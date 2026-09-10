@@ -1,20 +1,23 @@
 /**
- * Phase 5 demo hub.
+ * Demo hub.
  *
  * A top nav switches between views. Every view resolves layouts through the
  * exact same buildGraph → resolveContext → resolveLayout pipeline and renders
- * through <SurfaceStage>. The Phase 4 explainability panels (Debugger,
- * Counterfactuals, Health Check) sit under the single-surface view unchanged.
+ * through <SurfaceStage>. The explainability panels (Debugger, Counterfactuals,
+ * Health Check) sit under the single-surface view.
  *
- *   single   — surface picker + live layout + Phase 4 panels + degradation slider
- *   sidebyside — all 5 sample surfaces resolved at once (5.3)
- *   stress   — Stress Lab (5.1); "inspect" loads a surface back into `single`
- *   selfheal — combined-failure recovery demo (5.2)
- *   naive    — naive vs. smart resolver comparison (5.4)
- *   unknown  — type a brand-new surface and resolve it live (5.5)
+ *   single     — surface picker + live layout + panels + degradation slider
+ *   sidebyside — all 5 sample surfaces resolved at once
+ *   stress     — Stress Lab; "inspect" loads a surface back into `single`
+ *   selfheal   — combined-failure recovery demo
+ *   naive      — naive vs. smart resolver comparison
+ *   unknown    — type a brand-new surface and resolve it live
+ *
+ * Visual styling is in src/styles/theme.css. All data-testid hooks are
+ * unchanged.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { productAd, surfaceProfiles } from "./core/sample-data";
 import { defineSurface, type SurfaceProfile } from "./core/surfaces";
 import { buildGraph } from "./core/graph";
@@ -53,20 +56,53 @@ type Mode = "single" | "sidebyside" | "stress" | "selfheal" | "naive" | "unknown
 
 const MODES: { key: Mode; label: string }[] = [
   { key: "single", label: "Single surface" },
-  { key: "sidebyside", label: "Side-by-side (5.3)" },
-  { key: "stress", label: "Stress Lab (5.1)" },
-  { key: "selfheal", label: "Self-Healing (5.2)" },
-  { key: "naive", label: "Naive vs Smart (5.4)" },
-  { key: "unknown", label: "Unknown surface (5.5)" },
+  { key: "sidebyside", label: "Side-by-side" },
+  { key: "stress", label: "Stress Lab" },
+  { key: "selfheal", label: "Self-Healing" },
+  { key: "naive", label: "Naive vs Smart" },
+  { key: "unknown", label: "Unknown surface" },
 ];
 
 const VIEWPORT_MAX = { width: 900, height: 620 };
+
+type ThemeChoice = "system" | "light" | "dark";
+
+function readTheme(): ThemeChoice {
+  try {
+    const t = localStorage.getItem("ale-theme");
+    if (t === "light" || t === "dark") return t;
+  } catch {
+    /* ignore */
+  }
+  return "system";
+}
 
 export default function App(): JSX.Element {
   const [mode, setMode] = useState<Mode>("single");
   const [selectedKey, setSelectedKey] = useState<string>(BASE_OPTIONS[0]!.key);
   /** Surfaces loaded from the Stress Lab / other views, appended to the picker. */
   const [extraSurfaces, setExtraSurfaces] = useState<SurfaceProfile[]>([]);
+  const [theme, setTheme] = useState<ThemeChoice>(readTheme);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    try {
+      if (theme === "system") {
+        root.removeAttribute("data-theme");
+        localStorage.removeItem("ale-theme");
+      } else {
+        root.setAttribute("data-theme", theme);
+        localStorage.setItem("ale-theme", theme);
+      }
+    } catch {
+      if (theme === "system") root.removeAttribute("data-theme");
+      else root.setAttribute("data-theme", theme);
+    }
+  }, [theme]);
+
+  function cycleTheme(): void {
+    setTheme((t) => (t === "system" ? "light" : t === "light" ? "dark" : "system"));
+  }
 
   const graph = useMemo(() => buildGraph(productAd), []);
   const specById = useMemo(
@@ -105,44 +141,54 @@ export default function App(): JSX.Element {
   }
 
   const visible = layout.elements.filter((e) => e.visible);
+  const themeIcon = theme === "system" ? "🌗" : theme === "light" ? "☀️" : "🌙";
 
   return (
-    <div style={{ fontFamily: "system-ui, sans-serif", padding: 20 }}>
-      <h1 style={{ fontSize: 18, margin: "0 0 12px" }}>
-        Adaptive Layout Engine — Phase 5
+    <div className="ale-shell">
+      <h1 className="ale-title">
+        <span className="spark">Adaptive Layout Engine</span>
       </h1>
+      <p className="ale-subtitle">
+        One declarative ad spec → a correct, genuinely different layout per
+        surface. Experience graph, context engine, candidate generation and
+        deterministic scoring — every decision traced in plain language.
+      </p>
 
-      <nav
-        style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16 }}
-      >
-        {MODES.map((m) => (
-          <button
-            key={m.key}
-            type="button"
-            data-testid={`mode-${m.key}`}
-            aria-pressed={mode === m.key}
-            onClick={() => setMode(m.key)}
-            style={{
-              fontSize: 12,
-              padding: "6px 12px",
-              borderRadius: 4,
-              border: "1px solid #0066cc",
-              background: mode === m.key ? "#0066cc" : "#fff",
-              color: mode === m.key ? "#fff" : "#0066cc",
-              cursor: "pointer",
-            }}
-          >
-            {m.label}
-          </button>
-        ))}
+      <nav className="ale-nav">
+        <div className="ale-nav-tabs">
+          {MODES.map((m) => (
+            <button
+              key={m.key}
+              type="button"
+              className="ale-tab"
+              data-testid={`mode-${m.key}`}
+              aria-pressed={mode === m.key}
+              onClick={() => setMode(m.key)}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          className="ale-icon-btn"
+          data-testid="theme-toggle"
+          aria-label={`Theme: ${theme}. Click to change.`}
+          title={`Theme: ${theme}`}
+          onClick={cycleTheme}
+        >
+          {themeIcon}
+        </button>
       </nav>
 
       {mode === "single" && (
-        <div data-testid="single-view">
-          <label style={{ fontSize: 13, display: "block", marginBottom: 8 }}>
-            Surface:{" "}
+        <div className="ale-view" data-testid="single-view">
+          <label className="ale-field" style={{ marginBottom: 10 }}>
+            Surface
             <select
+              className="ale-select"
               data-testid="surface-picker"
+              name="surface-picker"
               value={selectedKey}
               onChange={(e) => setSelectedKey(e.target.value)}
             >
@@ -154,13 +200,18 @@ export default function App(): JSX.Element {
             </select>
           </label>
 
-          <p style={{ fontSize: 12, color: "#555", margin: "0 0 12px" }}>
-            winning strategy:{" "}
-            <b data-testid="winning-strategy">{trace.winningStrategy}</b> ·{" "}
-            {visible.length}/{layout.elements.length} elements visible · aspect{" "}
-            {context.aspectRatioClass} · attention {context.attentionBudget} ·
-            touch {String(context.isTouchInteractive)} · far{" "}
-            {String(context.isFarViewing)}
+          <p className="ale-meta">
+            winning strategy{" "}
+            <span className="ale-chip ale-chip--accent" data-testid="winning-strategy">
+              {trace.winningStrategy}
+            </span>{" "}
+            <span className="ale-num">
+              {visible.length}/{layout.elements.length}
+            </span>{" "}
+            visible · aspect <b>{context.aspectRatioClass}</b> · attention{" "}
+            <b>{context.attentionBudget}</b> · touch{" "}
+            <b>{String(context.isTouchInteractive)}</b> · far{" "}
+            <b>{String(context.isFarViewing)}</b>
           </p>
 
           <div style={{ marginBottom: 16 }}>
@@ -179,18 +230,7 @@ export default function App(): JSX.Element {
             specById={specById}
           />
 
-          <div
-            data-testid="phase4-panels"
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-              gap: 24,
-              alignItems: "start",
-              borderTop: "1px solid #ddd",
-              paddingTop: 16,
-              marginTop: 16,
-            }}
-          >
+          <div className="ale-panels-grid" data-testid="phase4-panels">
             <LayoutDebugger trace={trace} />
             <LayoutCounterfactuals key={surface.id} trace={trace} />
             <LayoutHealthCheck trace={trace} />
@@ -199,23 +239,37 @@ export default function App(): JSX.Element {
       )}
 
       {mode === "sidebyside" && (
-        <MultiSurfaceView graph={graph} specById={specById} />
+        <div className="ale-view">
+          <MultiSurfaceView graph={graph} specById={specById} />
+        </div>
       )}
 
-      {mode === "stress" && <StressLab onInspect={inspectSurface} />}
+      {mode === "stress" && (
+        <div className="ale-view">
+          <StressLab onInspect={inspectSurface} />
+        </div>
+      )}
 
-      {mode === "selfheal" && <SelfHealingDemo />}
+      {mode === "selfheal" && (
+        <div className="ale-view">
+          <SelfHealingDemo />
+        </div>
+      )}
 
       {mode === "naive" && (
-        <NaiveVsSmart
-          surfaces={options.map((o) => o.surface)}
-          graph={graph}
-          specById={specById}
-        />
+        <div className="ale-view">
+          <NaiveVsSmart
+            surfaces={options.map((o) => o.surface)}
+            graph={graph}
+            specById={specById}
+          />
+        </div>
       )}
 
       {mode === "unknown" && (
-        <UnknownSurfaceInput graph={graph} specById={specById} />
+        <div className="ale-view">
+          <UnknownSurfaceInput graph={graph} specById={specById} />
+        </div>
       )}
     </div>
   );

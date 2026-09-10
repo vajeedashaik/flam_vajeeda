@@ -1,9 +1,9 @@
 /**
- * 5.3 — side-by-side multi-surface view.
+ * Side-by-side multi-surface view.
  *
- * Renders all five Phase 1 sample surfaces at once, each resolved through the
- * real pipeline (buildGraph is shared; resolveContext + resolveLayout run per
- * surface) and drawn in a plain device-style frame, scaled to fit a grid cell.
+ * Renders all five sample surfaces at once, each resolved through the real
+ * pipeline (buildGraph is shared; resolveContext + resolveLayout run per
+ * surface) and drawn in a device-style frame, scaled to fit a grid cell.
  * Every mini-render is the actual resolved layout — no mockups.
  */
 
@@ -47,22 +47,13 @@ export function MultiSurfaceView({
   );
 
   return (
-    <section data-testid="multi-surface-view">
-      <h2 style={{ fontSize: 16, margin: "0 0 6px" }}>
-        Side-by-side — all 5 surfaces, one spec
-      </h2>
-      <p style={{ fontSize: 12, color: "#555", margin: "0 0 14px" }}>
+    <section className="ale-panel" data-testid="multi-surface-view">
+      <h2 className="ale-h2">Side-by-side — all 5 surfaces, one spec</h2>
+      <p className="ale-note">
         Each frame is the real resolved layout for that surface, not a mockup.
       </p>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))",
-          gap: 20,
-          alignItems: "start",
-        }}
-      >
+      <div className="ale-multi-grid" style={{ marginTop: 4 }}>
         {resolved.map(({ key, frame, surface, layout, trace }) => {
           const visible = layout.elements.filter((e) => e.visible);
           return (

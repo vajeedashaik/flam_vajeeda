@@ -1,10 +1,10 @@
 /**
- * 5.5 — live "unknown surface" input.
+ * Live "unknown surface" input.
  *
  * Type a brand-new surface's constraints, hit Resolve, and the exact same
- * pipeline every other surface uses runs on it: defineSurface() (so Phase 1
- * validation fires for real) → buildGraph (shared) → resolveContext →
- * resolveLayout → SurfaceStage. No new resolver code path.
+ * pipeline every other surface uses runs on it: defineSurface() (so validation
+ * fires for real) → buildGraph (shared) → resolveContext → resolveLayout →
+ * SurfaceStage. No new resolver code path.
  *
  * If defineSurface() throws on an invalid combination, its real error message
  * is shown verbatim — not swallowed.
@@ -87,130 +87,104 @@ export function UnknownSurfaceInput({
     }
   }
 
-  const field: React.CSSProperties = {
-    display: "flex",
-    flexDirection: "column",
-    gap: 2,
-    fontSize: 12,
-  };
-
   return (
-    <section data-testid="unknown-surface-input">
-      <h2 style={{ fontSize: 16, margin: "0 0 6px" }}>
-        Unknown surface — resolve a brand-new one live
-      </h2>
-      <p style={{ fontSize: 12, color: "#555", margin: "0 0 12px" }}>
+    <section className="ale-panel" data-testid="unknown-surface-input">
+      <h2 className="ale-h2">Unknown surface — resolve a brand-new one live</h2>
+      <p className="ale-note">
         Runs the exact same defineSurface → resolveLayout path as every built-in
         surface. No code changes.
       </p>
 
-      <form
-        onSubmit={submit}
-        style={{
-          display: "flex",
-          gap: 14,
-          flexWrap: "wrap",
-          alignItems: "flex-end",
-          marginBottom: 14,
-        }}
-      >
-        <label style={field}>
+      <form className="ale-toolbar" onSubmit={submit}>
+        <label className="ale-field">
           width
           <input
+            className="ale-input"
             data-testid="us-width"
+            name="us-width"
             value={width}
             onChange={(e) => setWidth(e.target.value)}
             style={{ width: 90 }}
           />
         </label>
-        <label style={field}>
+        <label className="ale-field">
           height
           <input
+            className="ale-input"
             data-testid="us-height"
+            name="us-height"
             value={height}
             onChange={(e) => setHeight(e.target.value)}
             style={{ width: 90 }}
           />
         </label>
-        <label style={field}>
+        <label className="ale-field">
           minTapTarget
           <input
+            className="ale-input"
             data-testid="us-min-tap"
+            name="us-min-tap"
             value={minTapTarget}
             onChange={(e) => setMinTapTarget(e.target.value)}
             placeholder="(none)"
             style={{ width: 90 }}
           />
         </label>
-        <label style={{ ...field, flexDirection: "row", alignItems: "center", gap: 6 }}>
+        <label className="ale-field" style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
           <input
             data-testid="us-touch-only"
+            name="us-touch-only"
             type="checkbox"
             checked={touchOnly}
             onChange={(e) => setTouchOnly(e.target.checked)}
           />
           touchOnly
         </label>
-        <label style={field}>
+        <label className="ale-field">
           viewingDistance
           <input
+            className="ale-input"
             data-testid="us-viewing-distance"
+            name="us-viewing-distance"
             value={viewingDistance}
             onChange={(e) => setViewingDistance(e.target.value)}
             placeholder="near / far / cm"
-            style={{ width: 110 }}
+            style={{ width: 120 }}
           />
         </label>
-        <label style={field}>
+        <label className="ale-field">
           attentionWindow (s)
           <input
+            className="ale-input"
             data-testid="us-attention"
+            name="us-attention"
             value={attentionWindow}
             onChange={(e) => setAttentionWindow(e.target.value)}
             placeholder="(none)"
             style={{ width: 90 }}
           />
         </label>
-        <button
-          type="submit"
-          data-testid="us-submit"
-          style={{
-            fontSize: 13,
-            padding: "6px 16px",
-            border: "1px solid #0066cc",
-            background: "#e8f1fb",
-            borderRadius: 4,
-            cursor: "pointer",
-          }}
-        >
+        <button type="submit" className="ale-btn" data-testid="us-submit">
           Resolve
         </button>
       </form>
 
       {error !== null && (
-        <p
-          data-testid="us-error"
-          style={{
-            fontSize: 13,
-            color: "#c33",
-            background: "#fdecec",
-            border: "1px solid #f3b8b8",
-            padding: "8px 10px",
-            borderRadius: 4,
-            maxWidth: 640,
-          }}
-        >
+        <p className="ale-error" data-testid="us-error">
           {error}
         </p>
       )}
 
       {result !== null && (
         <div data-testid="us-result">
-          <p style={{ fontSize: 12, color: "#555", margin: "0 0 8px" }}>
+          <p className="ale-meta">
             {result.surface.width}×{result.surface.height} · winning strategy{" "}
-            <b>{result.winningStrategy}</b> ·{" "}
-            {result.layout.elements.filter((e) => e.visible).length}/
-            {result.layout.elements.length} elements visible
+            <span className="ale-chip">{result.winningStrategy}</span> ·{" "}
+            <span className="ale-num">
+              {result.layout.elements.filter((e) => e.visible).length}/
+              {result.layout.elements.length}
+            </span>{" "}
+            elements visible
           </p>
           <SurfaceStage
             surface={result.surface}

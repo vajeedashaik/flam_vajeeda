@@ -1,11 +1,11 @@
 /**
- * 5.1 — Stress Lab panel.
+ * Stress Lab panel.
  *
  * "Run Stress Test" generates 200 randomized surface profiles, runs the real
  * pipeline against every one via runStressTest(), and shows the tiered summary
  * plus a click-through list of just the degraded/failed entries. Clicking an
  * entry calls `onInspect(surface)` so the parent can load that exact surface
- * into the main canvas for inspection with the Phase 4 panels.
+ * into the main canvas for inspection with the panels.
  */
 
 import { useState } from "react";
@@ -17,8 +17,45 @@ import {
   type StressResult,
 } from "../core/stress-lab";
 import type { SurfaceProfile } from "../core/surfaces";
+import { useCountUp } from "./useCountUp";
 
 const SAMPLE_COUNT = 200;
+
+function StatTile({
+  label,
+  value,
+  decimals = 0,
+  suffix = "",
+  variant,
+  testid,
+}: {
+  label: string;
+  value: number;
+  decimals?: number;
+  suffix?: string;
+  variant?: "ok" | "warn" | "bad" | "accent";
+  testid: string;
+}): JSX.Element {
+  const shown = useCountUp(value);
+  // The visible number animates; the data-testid node always carries the exact
+  // settled value so automated checks never read a mid-animation frame.
+  return (
+    <div className={`ale-stat${variant ? ` ale-stat--${variant}` : ""}`}>
+      <div className="ale-stat-label">{label}</div>
+      <div className="ale-stat-value" aria-hidden>
+        {shown.toFixed(decimals)}
+        {suffix}
+      </div>
+      <span
+        data-testid={testid}
+        style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clipPath: "inset(50%)" }}
+      >
+        {value.toFixed(decimals)}
+        {suffix}
+      </span>
+    </div>
+  );
+}
 
 export function StressLab({
   onInspect,
@@ -30,7 +67,6 @@ export function StressLab({
 
   function run(): void {
     setRunning(true);
-    // Let the button repaint as "running" before the synchronous work blocks.
     setTimeout(() => {
       const surfaces = generateRandomSurfaces(SAMPLE_COUNT);
       setResult(runStressTest(productAd, surfaces));
@@ -39,124 +75,85 @@ export function StressLab({
   }
 
   const robustness =
-    result && result.total > 0
-      ? ((result.passed / result.total) * 100).toFixed(1)
-      : null;
+    result && result.total > 0 ? (result.passed / result.total) * 100 : 0;
 
   const problems = result
     ? result.details.filter((d) => d.outcome !== "passed")
     : [];
 
   return (
-    <section data-testid="stress-lab" style={{ fontSize: 13 }}>
-      <h2 style={{ fontSize: 16, margin: "0 0 8px" }}>Stress Lab</h2>
-      <p style={{ fontSize: 12, color: "#555", margin: "0 0 10px", maxWidth: 640 }}>
+    <section className="ale-panel" data-testid="stress-lab">
+      <h2 className="ale-h2">Stress Lab</h2>
+      <p className="ale-note" style={{ maxWidth: 640 }}>
         Generates {SAMPLE_COUNT} randomized surfaces (dimensions from 100×600 to
         3840×2160, random constraint mixes) and runs the real
         buildGraph → resolveContext → resolveLayout pipeline against each.
-        Threshold for "degraded": overall score &lt; {DEGRADED_SCORE_THRESHOLD}.
+        Threshold for &ldquo;degraded&rdquo;: overall score &lt;{" "}
+        {DEGRADED_SCORE_THRESHOLD}.
       </p>
 
       <button
         type="button"
+        className="ale-btn"
         data-testid="run-stress-test"
         onClick={run}
         disabled={running}
-        style={{
-          fontSize: 13,
-          padding: "8px 16px",
-          cursor: running ? "default" : "pointer",
-          border: "1px solid #0066cc",
-          background: running ? "#eee" : "#e8f1fb",
-          borderRadius: 4,
-        }}
       >
         {running ? "Running…" : "Run Stress Test"}
       </button>
 
       {result && (
-        <div data-testid="stress-summary" style={{ marginTop: 14 }}>
-          <div
-            style={{
-              display: "flex",
-              gap: 18,
-              flexWrap: "wrap",
-              fontSize: 13,
-              marginBottom: 8,
-            }}
-          >
-            <span>
-              total tested: <b data-testid="stat-total">{result.total}</b>
-            </span>
-            <span style={{ color: "#2a7" }}>
-              passed: <b data-testid="stat-passed">{result.passed}</b>
-            </span>
-            <span style={{ color: "#b80" }}>
-              degraded: <b data-testid="stat-degraded">{result.degraded}</b>
-            </span>
-            <span style={{ color: "#c33" }}>
-              failed: <b data-testid="stat-failed">{result.failed}</b>
-            </span>
-            <span>
-              robustness (passed/total):{" "}
-              <b data-testid="stat-robustness">{robustness}%</b>
-            </span>
+        <div data-testid="stress-summary" style={{ marginTop: 16 }}>
+          <div className="ale-stats">
+            <StatTile label="total tested" value={result.total} testid="stat-total" />
+            <StatTile label="passed" value={result.passed} variant="ok" testid="stat-passed" />
+            <StatTile label="degraded" value={result.degraded} variant="warn" testid="stat-degraded" />
+            <StatTile label="failed" value={result.failed} variant="bad" testid="stat-failed" />
+            <StatTile
+              label="robustness"
+              value={robustness}
+              decimals={1}
+              suffix="%"
+              variant="accent"
+              testid="stat-robustness"
+            />
           </div>
 
           {result.failed > 0 && (
             <p
               data-testid="stress-failed-warning"
-              style={{ color: "#c33", fontWeight: 700 }}
+              className="ale-error"
+              style={{ marginTop: 4, fontWeight: 700 }}
             >
               ⚠ {result.failed} surface(s) broke a hard invariant. This should be
               impossible — investigate before trusting these results.
             </p>
           )}
 
-          <h3 style={{ fontSize: 13, margin: "12px 0 6px" }}>
+          <h3 className="ale-h3" style={{ marginTop: 14 }}>
             Degraded / failed entries ({problems.length}) — click one to load it
             into the main canvas
           </h3>
           {problems.length === 0 ? (
-            <p style={{ color: "#2a7" }}>
+            <p className="ale-note" style={{ color: "var(--ok)" }}>
               Every surface passed at or above the threshold.
             </p>
           ) : (
-            <ul
-              style={{
-                listStyle: "none",
-                padding: 0,
-                margin: 0,
-                maxHeight: 320,
-                overflowY: "auto",
-                border: "1px solid #eee",
-              }}
-            >
+            <ul className="ale-problem-list">
               {problems.map((d) => (
                 <li key={d.surface.id}>
                   <button
                     type="button"
+                    className="ale-problem"
                     data-testid="stress-problem-row"
                     data-outcome={d.outcome}
                     onClick={() => onInspect(d.surface)}
-                    style={{
-                      width: "100%",
-                      textAlign: "left",
-                      display: "flex",
-                      justifyContent: "space-between",
-                      gap: 12,
-                      fontSize: 12,
-                      padding: "6px 10px",
-                      border: "none",
-                      borderBottom: "1px solid #eee",
-                      background: d.outcome === "failed" ? "#fdecec" : "#fff7e6",
-                      cursor: "pointer",
-                    }}
                   >
                     <span>
                       <b
                         style={{
-                          color: d.outcome === "failed" ? "#c33" : "#b80",
+                          color:
+                            d.outcome === "failed" ? "var(--bad)" : "var(--warn)",
                         }}
                       >
                         {d.outcome}
@@ -165,7 +162,7 @@ export function StressLab({
                       {d.overallScore}
                       {d.reason ? ` · ${d.reason}` : ""}
                     </span>
-                    <span style={{ color: "#0066cc" }}>inspect →</span>
+                    <span className="go">inspect →</span>
                   </button>
                 </li>
               ))}

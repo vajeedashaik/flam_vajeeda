@@ -1,13 +1,13 @@
 /**
- * 5.2 — self-healing (combined failure) demo.
+ * Self-healing (combined failure) demo.
  *
  * Loads the deliberately broken scenario (absurdly long headline, invalid hero
  * image src, missing logo src, tiny surface, optional longer German CTA), shows
  * a brief "Layout invalid — re-optimizing" beat, then the recovered layout.
  *
  * "Before" is the naive resolver's attempt on the same input (overlap / tiny),
- * "after" is the real pipeline's recovery. The Phase 4 LayoutDebugger panel is
- * reused verbatim, fed a trace whose per-element notes are augmented with the
+ * "after" is the real pipeline's recovery. The LayoutDebugger panel is reused
+ * verbatim, fed a trace whose per-element notes are augmented with the
  * placeholder decisions the renderer made for the broken images.
  */
 
@@ -49,7 +49,6 @@ export function SelfHealingDemo(): JSX.Element {
     return { naive: n, layout: resolved.layout, trace: resolved.trace };
   }, [graph]);
 
-  // Augment the trace's per-element notes with the placeholder decisions.
   const augmentedTrace: DecisionTrace = useMemo(() => {
     const extra: string[] = [];
     for (const el of layout.elements) {
@@ -72,7 +71,6 @@ export function SelfHealingDemo(): JSX.Element {
     return () => clearTimeout(t);
   }, [phase]);
 
-  // Re-run the "optimizing" beat when the locale changes mid-demo.
   useEffect(() => {
     if (phase === "done") setPhase("optimizing");
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -81,36 +79,29 @@ export function SelfHealingDemo(): JSX.Element {
   const visible = layout.elements.filter((e) => e.visible);
 
   return (
-    <section data-testid="self-healing-demo">
-      <h2 style={{ fontSize: 16, margin: "0 0 6px" }}>
-        Self-healing — combined failure recovery
-      </h2>
-      <p style={{ fontSize: 12, color: "#555", margin: "0 0 12px", maxWidth: 680 }}>
+    <section className="ale-panel" data-testid="self-healing-demo">
+      <h2 className="ale-h2">Self-healing — combined failure recovery</h2>
+      <p className="ale-note" style={{ maxWidth: 680 }}>
         Long headline + invalid hero image + missing logo image + a longer
         translated CTA, all on a 240×260 touch panel. The pipeline recovers to a
         valid, overlap-free layout with the CTA still visible.
       </p>
 
-      <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 12 }}>
+      <div className="ale-toolbar">
         <button
           type="button"
+          className="ale-btn"
           data-testid="run-self-healing"
           onClick={() => setPhase("optimizing")}
-          style={{
-            fontSize: 13,
-            padding: "8px 16px",
-            border: "1px solid #0066cc",
-            background: "#e8f1fb",
-            borderRadius: 4,
-            cursor: "pointer",
-          }}
         >
           Load broken scenario
         </button>
-        <label style={{ fontSize: 12 }}>
-          CTA locale:{" "}
+        <label className="ale-field">
+          CTA locale
           <select
+            className="ale-select"
             data-testid="self-healing-locale"
+            name="self-healing-locale"
             value={locale}
             onChange={(e) => setLocale(e.target.value as ScenarioLocale)}
           >
@@ -121,26 +112,16 @@ export function SelfHealingDemo(): JSX.Element {
       </div>
 
       {phase === "optimizing" && (
-        <p
-          data-testid="self-healing-status"
-          style={{ fontSize: 13, color: "#b80", fontWeight: 700 }}
-        >
+        <p className="ale-status" data-testid="self-healing-status">
           Layout invalid — re-optimizing…
         </p>
       )}
 
       {phase === "done" && (
         <>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
-              gap: 24,
-              marginBottom: 16,
-            }}
-          >
-            <div data-testid="self-healing-before">
-              <h3 style={{ fontSize: 13, margin: "0 0 6px", color: "#c33" }}>
+          <div className="ale-split-grid" style={{ margin: "4px 0 16px" }}>
+            <div className="ale-card" data-testid="self-healing-before">
+              <h3 className="ale-h3" style={{ color: "var(--bad)" }}>
                 Before — naive attempt (overlapping / clipped)
               </h3>
               <SurfaceStage
@@ -151,8 +132,8 @@ export function SelfHealingDemo(): JSX.Element {
                 maxHeight={380}
               />
             </div>
-            <div data-testid="self-healing-after">
-              <h3 style={{ fontSize: 13, margin: "0 0 6px", color: "#2a7" }}>
+            <div className="ale-card" data-testid="self-healing-after">
+              <h3 className="ale-h3" style={{ color: "var(--ok)" }}>
                 After — recovered ({trace.winningStrategy}, {visible.length}/
                 {layout.elements.length} visible)
               </h3>

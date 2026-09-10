@@ -3,7 +3,7 @@
  *
  * A pass/warn/fail checklist derived purely from the winning candidate's
  * ScoreBreakdown. No new scoring logic — just presentation thresholds on top of
- * Phase 3's numbers.
+ * the existing numbers.
  *
  * THRESHOLDS (applied identically to all five sub-scores, each 0-100):
  *   score ≥ 85  → ✓  pass
@@ -25,10 +25,10 @@ const ROWS: { key: keyof Omit<ScoreBreakdown, "overall">; label: string }[] = [
   { key: "renderCost", label: "Render efficiency" },
 ];
 
-function verdict(score: number): { icon: string; color: string } {
-  if (score >= PASS) return { icon: "✓", color: "#2a7" };
-  if (score >= WARN) return { icon: "⚠", color: "#b80" };
-  return { icon: "✕", color: "#c33" };
+function verdict(score: number): { icon: string; cls: string } {
+  if (score >= PASS) return { icon: "✓", cls: "ale-row--ok" };
+  if (score >= WARN) return { icon: "⚠", cls: "ale-row--warn" };
+  return { icon: "✕", cls: "ale-row--bad" };
 }
 
 export function LayoutHealthCheck({
@@ -42,42 +42,37 @@ export function LayoutHealthCheck({
   const score = winning?.score;
 
   return (
-    <section data-testid="layout-health-check" style={{ minWidth: 260 }}>
-      <h2 style={{ fontSize: 14, margin: "0 0 6px" }}>Layout Health Check</h2>
-      <p style={{ fontSize: 11, color: "#666", margin: "0 0 8px" }}>
+    <section className="ale-panel" data-testid="layout-health-check">
+      <h2 className="ale-h2">Layout Health Check</h2>
+      <p className="ale-note">
         At-a-glance verdict for the winning layout ({trace.winningStrategy}).
       </p>
 
       {!score ? (
-        <p style={{ fontSize: 12, color: "#c33" }}>No winning score available.</p>
+        <p className="ale-note" style={{ color: "var(--bad)" }}>
+          No winning score available.
+        </p>
       ) : (
-        <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-          {ROWS.map(({ key, label }) => {
+        <ul className="ale-list">
+          {ROWS.map(({ key, label }, i) => {
             const v = verdict(score[key]);
             return (
               <li
                 key={key}
+                className={`ale-row ${v.cls}`}
                 data-testid="health-row"
                 data-metric={key}
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  fontSize: 12,
-                  padding: "5px 0",
-                  borderBottom: "1px solid #eee",
-                }}
+                style={{ animationDelay: `${i * 45}ms` }}
               >
-                <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <span
-                    aria-hidden
-                    style={{ color: v.color, fontWeight: 700, width: 14 }}
-                  >
-                    {v.icon}
+                <span className="ale-row-split">
+                  <span style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                    <span className="ic" aria-hidden>
+                      {v.icon}
+                    </span>
+                    {label}
                   </span>
-                  {label}
+                  <span className="val">{score[key]}</span>
                 </span>
-                <span style={{ color: "#888" }}>{score[key]}</span>
               </li>
             );
           })}

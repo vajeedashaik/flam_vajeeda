@@ -261,7 +261,17 @@ src/
     LayoutHealthCheck.tsx    explainability panel 3
     StressLab.tsx MultiSurfaceView.tsx SelfHealingDemo.tsx
     NaiveVsSmart.tsx DegradationSlider.tsx UnknownSurfaceInput.tsx
+    useCountUp.ts             presentation-only number animation hook
+  styles/
+    theme.css                design system — glassmorphism + claymorphism,
+                              dark-first with a light toggle, CSS custom
+                              properties, prefers-reduced-motion aware
   App.tsx main.tsx
 phase1.md … phase6.md        the phase specifications this was built against
 ARCHITECTURE.md
 ```
+
+The UI is a presentation layer only: all styling lives in `styles/theme.css`
+plus `className`s on component wrappers. No `src/core/**` file is imported by a
+style concern, and the resolver output is unchanged. Theme choice (system /
+light / dark) is toggled from the nav and persisted to `localStorage`.

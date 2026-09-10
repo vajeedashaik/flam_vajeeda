@@ -1,5 +1,5 @@
 /**
- * 5.4 — naive vs. smart comparison.
+ * Naive vs. smart comparison.
  *
  * Same spec, same surface, two resolvers side by side:
  *   left  — naiveResolveLayout(): one uniform scale factor, diagonal stagger,
@@ -32,14 +32,12 @@ export function NaiveVsSmart({
   graph: ExperienceGraph;
   specById: Map<string, AdElement>;
 }): JSX.Element {
-  // Default to the most constrained surface — that is where the gap shows.
   const smallest = useMemo(
     () => [...surfaces].sort((a, b) => area(a) - area(b))[0]!,
     [surfaces],
   );
   const [selectedId, setSelectedId] = useState(smallest.id);
-  const surface =
-    surfaces.find((s) => s.id === selectedId) ?? smallest;
+  const surface = surfaces.find((s) => s.id === selectedId) ?? smallest;
 
   const naive = useMemo(
     () => naiveResolveLayout(graph, surface),
@@ -54,12 +52,14 @@ export function NaiveVsSmart({
   const smartVisible = smart.layout.elements.filter((e) => e.visible).length;
 
   return (
-    <section data-testid="naive-vs-smart">
-      <h2 style={{ fontSize: 16, margin: "0 0 6px" }}>Naive vs. Smart resolver</h2>
-      <label style={{ fontSize: 13, display: "block", marginBottom: 12 }}>
-        Surface:{" "}
+    <section className="ale-panel" data-testid="naive-vs-smart">
+      <h2 className="ale-h2">Naive vs. Smart resolver</h2>
+      <label className="ale-field" style={{ margin: "8px 0 14px" }}>
+        Surface
         <select
+          className="ale-select"
           data-testid="naive-surface-picker"
+          name="naive-surface-picker"
           value={selectedId}
           onChange={(e) => setSelectedId(e.target.value)}
         >
@@ -71,15 +71,9 @@ export function NaiveVsSmart({
         </select>
       </label>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
-          gap: 24,
-        }}
-      >
-        <div data-testid="naive-side">
-          <h3 style={{ fontSize: 13, margin: "0 0 6px", color: "#c33" }}>
+      <div className="ale-split-grid">
+        <div className="ale-card" data-testid="naive-side">
+          <h3 className="ale-h3" style={{ color: "var(--bad)" }}>
             Naive — uniform scale, no priority ({naiveVisible}/
             {naive.elements.length} visible, overlap allowed)
           </h3>
@@ -92,8 +86,8 @@ export function NaiveVsSmart({
           />
         </div>
 
-        <div data-testid="smart-side">
-          <h3 style={{ fontSize: 13, margin: "0 0 6px", color: "#2a7" }}>
+        <div className="ale-card" data-testid="smart-side">
+          <h3 className="ale-h3" style={{ color: "var(--ok)" }}>
             Smart — {smart.trace.winningStrategy} ({smartVisible}/
             {smart.layout.elements.length} visible, zero overlap)
           </h3>
