@@ -1,0 +1,46 @@
+// -----------------------------------------------------------------------------
+// COMPILE-ERROR DEMONSTRATION — this file is intentionally NOT valid TypeScript.
+//
+// It is stored as `.ts.txt` and excluded in tsconfig.json so it never breaks
+// the build. To see the error yourself: copy the body below into a real
+// `src/core/scratch.ts` and run `npx tsc --noEmit` (then delete it).
+// -----------------------------------------------------------------------------
+
+import { defineAd } from "./spec";
+
+// A typo in `role` ("primry" instead of "primary") is caught by the compiler,
+// because ElementRole is a closed union, not `string`.
+export const brokenAd = defineAd({
+  id: "broken-ad",
+  elements: [
+    {
+      id: "headline",
+      type: "text",
+      role: "primry", // <-- typo
+      priority: 1,
+    },
+  ],
+});
+
+// Exact `npx tsc --noEmit` output for the typo above (verified 2026-09-10):
+//
+//   src/core/scratch.ts(9,7): error TS2820: Type '"primry"' is not assignable
+//   to type 'ElementRole'. Did you mean '"primary"'?
+//
+//   (process exits with code 2)
+//
+// -----------------------------------------------------------------------------
+// Other things the type system rejects at compile time in the same way:
+//
+//   type: "img"          -> TS2322: Type '"img"' is not assignable to type
+//                           'ElementType'. (valid: "text" | "image" | "button")
+//
+//   importance: "meh"    -> TS2322: Type '"meh"' is not assignable to type
+//                           'ElementImportance | undefined'.
+//
+//   priority: "1"        -> TS2322: Type 'string' is not assignable to type
+//                           'number'.
+//
+//   (missing `role`)     -> TS2741: Property 'role' is missing in type ... but
+//                           required in type 'AdElement'.
+// -----------------------------------------------------------------------------

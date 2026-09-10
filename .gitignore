@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.local
+.DS_Store
+phase5-screens/
+phase6-screens/
+.playwright-mcp/
