@@ -159,8 +159,8 @@ Real, specific to what was built (more technical depth in
 
 ## Time spent
 
-<!-- TODO(author): fill in the real figure before submission — do not guess. -->
-_Pending — to be filled in by the author._
+Approximately **1 day** of focused work, across six specified phases
+(`phase1.md`–`phase6.md`).
 
 ---
 
