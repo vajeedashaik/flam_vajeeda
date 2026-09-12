@@ -661,44 +661,98 @@ body::before {
   font-variant-numeric: tabular-nums;
 }
 
-/* the resolved-layout viewport */
+/* the resolved-layout viewport — styled as a Nykaa-style PDP/ad canvas rather
+   than a neutral grid-paper mockup, since the sample ad is now real product
+   content (DIOR Backstage Rosy Glow Stick), not colored placeholder boxes. */
 .ale-surface {
   outline: 1px solid var(--glass-border);
   border-radius: 6px;
   background:
-    linear-gradient(0deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.03)),
-    repeating-linear-gradient(0deg, transparent, transparent 23px, rgba(127, 127, 127, 0.06) 24px),
-    repeating-linear-gradient(90deg, transparent, transparent 23px, rgba(127, 127, 127, 0.06) 24px),
-    #f7f6fb;
+    radial-gradient(120% 90% at 100% 0%, rgba(252, 39, 121, 0.1), transparent 55%),
+    radial-gradient(90% 70% at 0% 100%, rgba(252, 39, 121, 0.06), transparent 60%),
+    #fffbfc;
 }
 
-/* element chips inside the stage */
+/* Nykaa pink wordmark badge — decorative "sold on" chrome, not resolver data.
+   Deliberately tiny so it reads as a corner watermark rather than competing
+   with real ad content, even on the smallest stress-test surfaces. */
+.ale-platform-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 1;
+  font-family: system-ui, sans-serif;
+  font-size: 8px;
+  font-weight: 800;
+  font-style: italic;
+  letter-spacing: 0.01em;
+  color: #fff;
+  background: #fc2779;
+  padding: 2px 6px;
+  border-radius: 999px;
+  box-shadow: 0 2px 5px -1px rgba(252, 39, 121, 0.5);
+  pointer-events: none;
+  opacity: 0.9;
+}
+
+/* element chips inside the stage — each role reads as a real ad component
+   (headline copy, a pink pill CTA, a product photo card, a price line, a
+   brand wordmark) instead of a uniformly-tinted debug box. */
 .ale-el {
   position: absolute;
   box-sizing: border-box;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-  padding: 3px 5px;
   overflow: hidden;
-  border-radius: 7px;
-  color: #10131a;
+  font-size: 10px;
+  color: #1a1a1a;
   display: flex;
-  align-items: flex-start;
-  gap: 4px;
-  border: 1.5px solid var(--el-c, var(--role-primary));
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.1)),
-    color-mix(in srgb, var(--el-c, var(--role-primary)) 24%, transparent);
-  box-shadow:
-    0 3px 8px -2px color-mix(in srgb, var(--el-c, var(--role-primary)) 50%, transparent),
-    inset 0 1px 1px rgba(255, 255, 255, 0.5);
 }
-.ale-el[data-role="primary"]   { --el-c: var(--role-primary); }
-.ale-el[data-role="action"]    { --el-c: var(--role-action); }
-.ale-el[data-role="hero"]      { --el-c: var(--role-hero); }
-.ale-el[data-role="secondary"] { --el-c: var(--role-secondary); }
-.ale-el[data-role="branding"]  { --el-c: var(--role-branding); }
+
+.ale-el[data-role="primary"] {
+  align-items: flex-start;
+  font-weight: 800;
+  line-height: 1.22;
+  letter-spacing: -0.01em;
+  color: #1f1a22;
+  padding: 2px 4px 0 0;
+}
+
+.ale-el[data-role="action"] {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #fff;
+  background: linear-gradient(135deg, #fc2779, #e0125a);
+  border-radius: 999px;
+  box-shadow: 0 6px 16px -6px rgba(252, 39, 121, 0.6), inset 0 1px 1px rgba(255, 255, 255, 0.35);
+}
+
+.ale-el[data-role="hero"] {
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(180deg, #ffffff, #fdf1f5);
+  border-radius: 14px;
+  box-shadow: 0 10px 26px -12px rgba(80, 30, 50, 0.35), inset 0 0 0 1px rgba(252, 39, 121, 0.08);
+}
+.ale-el[data-role="hero"] img { object-fit: contain; padding: 8%; }
+
+.ale-el[data-role="secondary"] {
+  align-items: center;
+  font-weight: 700;
+  color: #2a2a2a;
+}
+
+.ale-el[data-role="branding"] {
+  align-items: center;
+  justify-content: center;
+  font-family: Georgia, "Times New Roman", serif;
+  font-style: italic;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #3a3040;
+}
+
 .ale-el--placeholder {
   border: 2px dashed var(--bad);
   color: #a11;
@@ -707,6 +761,10 @@ body::before {
   justify-content: center;
   text-align: center;
   box-shadow: none;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 5px;
+  border-radius: 7px;
 }
 .ale-el img { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: 4px; }
 
