@@ -4,6 +4,7 @@ import { buildGraph } from "../graph";
 import { resolveContext, type Context } from "../context";
 import { defineSurface, type SurfaceProfile } from "../surfaces";
 import { productAd, surfaceProfiles } from "../sample-data";
+import { measureTextWidth } from "../text-measure";
 
 const ALL_STRATEGIES: CandidateStrategy[] = [
   "vertical-stack",
@@ -113,5 +114,101 @@ describe("generateCandidates — context-aware element sizing (§4.3-context)", 
 
     expect(widthOf(touch, "cta")).toBeGreaterThan(widthOf(notTouch, "cta"));
     expect(widthOf(touch, "headline")).toBe(widthOf(notTouch, "headline"));
+  });
+});
+
+describe("generateCandidates — grow into slack, capped, brand-lock exempt", () => {
+  // Deliberately oversized so every element has far more room than it needs —
+  // isolates growth behaviour from the shrink cascade.
+  const spaciousSurface: SurfaceProfile = defineSurface({
+    id: "grow-test-surface",
+    width: 4000,
+    height: 4000,
+  });
+  const ctx = resolveContext(spaciousSurface);
+  const cands = generateCandidates(graph, ctx, spaciousSurface);
+
+  function naturalWidth(id: string): number {
+    const spec = productAd.elements.find((e) => e.id === id)!;
+    return measureTextWidth(spec.text!, spec.fontSize!);
+  }
+
+  it("vertical-stack (width is the free axis): a non-locked text element grows beyond its measured width, capped at 1.4x", () => {
+    const headline = el(strat(cands, "vertical-stack"), "headline");
+    const natural = naturalWidth("headline");
+
+    expect(headline.width).toBeGreaterThan(natural * 1.05);
+    // GROWTH_CAP_FACTOR = 1.4 in candidates.ts; +2 covers the ceil() rounding.
+    expect(headline.width).toBeLessThanOrEqual(Math.ceil(natural) * 1.4 + 2);
+  });
+
+  it("vertical-stack: never grows the brandRules.locked logo beyond its own natural width", () => {
+    const logo = el(strat(cands, "vertical-stack"), "logo");
+    const natural = naturalWidth("logo");
+
+    expect(logo.width).toBeLessThanOrEqual(Math.ceil(natural) + 1);
+  });
+
+  it("vertical-stack: HEIGHT is the cascading axis and never grows, even with slack", () => {
+    const headlineSpec = productAd.elements.find((e) => e.id === "headline")!;
+    const lineHeight = Math.ceil((headlineSpec.fontSize ?? 16) * 1.3);
+    const naturalHeight = Math.max(
+      lineHeight,
+      headlineSpec.minSize?.height ?? 0,
+      headlineSpec.preferredSize?.height ?? 0,
+    );
+    const headline = el(strat(cands, "vertical-stack"), "headline");
+
+    expect(headline.height).toBeLessThanOrEqual(naturalHeight + 1);
+  });
+
+  it("horizontal-split (height is the free axis): a non-locked element grows beyond its natural height, capped at 1.4x", () => {
+    const priceSpec = productAd.elements.find((e) => e.id === "price")!;
+    const lineHeight = Math.ceil((priceSpec.fontSize ?? 16) * 1.3);
+    const naturalHeight = Math.max(
+      lineHeight,
+      priceSpec.minSize?.height ?? 0,
+      priceSpec.preferredSize?.height ?? 0,
+    );
+    const price = el(strat(cands, "horizontal-split"), "price");
+
+    expect(price.height).toBeGreaterThan(naturalHeight * 1.05);
+    expect(price.height).toBeLessThanOrEqual(naturalHeight * 1.4 + 2);
+  });
+
+  it("grid (both axes free): a non-locked element grows on both width and height", () => {
+    const price = el(strat(cands, "grid"), "price");
+    const natural = naturalWidth("price");
+
+    expect(price.width).toBeGreaterThan(natural * 1.05);
+  });
+
+  it("overlay-safe-margins deliberately opts out of growth — sizes stay at natural/shrunk only", () => {
+    const price = el(strat(cands, "overlay-safe-margins"), "price");
+    const natural = naturalWidth("price");
+
+    expect(price.width).toBeLessThanOrEqual(Math.ceil(natural) + 1);
+  });
+
+  it("growth never breaks the non-overlap / in-bounds invariants", () => {
+    for (const strategy of ALL_STRATEGIES) {
+      const c = strat(cands, strategy);
+      const visible = c.elements.filter((e) => e.visible);
+      for (let i = 0; i < visible.length; i++) {
+        for (let j = i + 1; j < visible.length; j++) {
+          const a = visible[i]!;
+          const b = visible[j]!;
+          const overlaps =
+            a.x < b.x + b.width &&
+            a.x + a.width > b.x &&
+            a.y < b.y + b.height &&
+            a.y + a.height > b.y;
+          expect(overlaps, `${strategy}: ${a.id} overlaps ${b.id}`).toBe(false);
+        }
+        const e = visible[i]!;
+        expect(e.x + e.width).toBeLessThanOrEqual(spaciousSurface.width + 0.5);
+        expect(e.y + e.height).toBeLessThanOrEqual(spaciousSurface.height + 0.5);
+      }
+    }
   });
 });
