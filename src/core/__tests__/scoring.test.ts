@@ -420,25 +420,31 @@ describe("computeCompositionCohesion (§7.4: the whole ad must read as one conne
   });
 
   it("does not penalize a legitimate full-width composition that efficiently fills its own footprint", () => {
-    // A wide banner: headline hugs the left edge, cta hugs the right edge, but
-    // both are large relative to the gap between them — this is a normal,
-    // good wide-format ad (like a real lower-third), not "scattered corners
-    // with a dead void." It should score well despite spanning the surface.
+    // A wide banner showing its FULL content (coverage = 1, same as any other
+    // candidate that drops nothing): headline/cta/image/price/logo laid out
+    // left-to-right, each large relative to the small gaps between them —
+    // this is a normal, good wide-format ad (like a real lower-third), not
+    // "scattered corners with a dead void." It should score well despite
+    // spanning the surface.
     const wideBanner: Candidate = {
       strategy: "horizontal-split",
       notes: [],
       elements: [
-        vis("headline", "primary", 0, 0, 700, 200),
-        vis("cta", "action", 700, 0, 700, 200),
-        dropped("product-image", "hero"),
-        dropped("price", "secondary"),
-        dropped("logo", "branding"),
+        vis("headline", "primary", 0, 0, 500, 200),
+        vis("cta", "action", 510, 0, 300, 200),
+        vis("product-image", "hero", 820, 0, 400, 200),
+        vis("price", "secondary", 1230, 0, 250, 200),
+        vis("logo", "branding", 1490, 0, 150, 200),
       ],
     };
     expect(computeCompositionCohesion(wideBanner)).toBeGreaterThan(90);
   });
 
-  it("on every real sample surface, overlay-safe-margins's scattered corners score meaningfully lower on compositionCohesion than vertical-stack's clustered arrangement", () => {
+  it("on every real sample surface, overlay-safe-margins's scattered corners never score BETTER than vertical-stack's clustered arrangement on compositionCohesion", () => {
+    // Not a strict ">" everywhere: on a wide-but-short surface, vertical-stack
+    // itself has to drop content to fit (§7.6 — its own coverage suffers), so
+    // it can land in a near-tie with overlay rather than a clean win. What
+    // must never happen is overlay's scattered corners coming out AHEAD.
     for (const surfaceKey of [
       "mobilePortrait",
       "mobileLandscape",
@@ -456,8 +462,8 @@ describe("computeCompositionCohesion (§7.4: the whole ad must read as one conne
       const verticalCohesion = computeCompositionCohesion(vertical);
       expect(
         verticalCohesion,
-        `${surfaceKey}: expected vertical-stack's cohesion (${verticalCohesion}) > overlay-safe-margins's (${overlayCohesion})`,
-      ).toBeGreaterThan(overlayCohesion);
+        `${surfaceKey}: expected vertical-stack's cohesion (${verticalCohesion}) >= overlay-safe-margins's (${overlayCohesion})`,
+      ).toBeGreaterThanOrEqual(overlayCohesion);
     }
   });
 
@@ -478,6 +484,33 @@ describe("computeCompositionCohesion (§7.4: the whole ad must read as one conne
         trace.winningStrategy,
         `${surfaceKey} resolved to overlay-safe-margins's scattered-corners layout`,
       ).not.toBe("overlay-safe-margins");
+    }
+  });
+
+  /**
+   * §7.6 — density alone made compositionCohesion gameable: a candidate that
+   * DROPS elements shrinks its own footprint along with them, so "fewer
+   * things packed tighter" could measure as denser than "everything shown,
+   * slightly looser." On the real `mobileLandscape` and `broadcastLowerThird`
+   * surfaces this let vertical-stack win while silently dropping price (and
+   * the logo) — a real, user-reported "where did price go" bug — even though
+   * grid/horizontal-split could have shown all 5 elements. The `coverage`
+   * factor added to `computeCompositionCohesion` closes that loophole; this
+   * is the regression guard proving every real sample surface now shows the
+   * full ad.
+   */
+  it("REGRESSION GUARD: every element stays visible on every one of the 5 real sample surfaces — a strategy may never win by silently dropping content to look 'tighter'", () => {
+    for (const surfaceKey of [
+      "mobilePortrait",
+      "mobileLandscape",
+      "broadcastLowerThird",
+      "retailKiosk",
+      "printQRPanel",
+    ] as const) {
+      const s = surfaceProfiles[surfaceKey];
+      const { layout } = resolveLayout(graph, resolveContext(s), s);
+      const visibleCount = layout.elements.filter((e) => e.visible).length;
+      expect(visibleCount, `${surfaceKey}: only ${visibleCount}/5 elements visible`).toBe(5);
     }
   });
 });
