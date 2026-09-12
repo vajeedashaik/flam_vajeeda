@@ -18,12 +18,19 @@
  * Visual styling (frames, role tints, placeholder) lives in theme.css; the
  * data-* hooks (data-testid, data-surface-id, data-element-id, data-role,
  * data-placeholder) are unchanged.
+ *
+ * Optional debug overlay (`showDebug`): rendered as the LAST child inside the
+ * same `.ale-surface` div that the real elements are children of, so it rides
+ * the same `transform: scale(s)` and needs no scale math of its own — boxes
+ * stay pixel-aligned with the real elements at every scale factor.
  */
 
 import { useEffect, useState } from "react";
 import type { AdElement } from "../core/spec";
 import type { ResolvedElement } from "../core/resolver";
 import type { SurfaceProfile } from "../core/surfaces";
+import type { DecisionTrace } from "../core/trace";
+import { DebugOverlay } from "./DebugOverlay";
 
 export type StageFrame = "phone" | "wide" | "square" | "none";
 
@@ -81,7 +88,11 @@ function StageElement({ el, spec }: StageElementProps): JSX.Element {
 export interface SurfaceStageProps {
   surface: SurfaceProfile;
   elements: ResolvedElement[];
-  specById?: Map<string, AdElement>;
+  specById?: Map<string, AdElement> | undefined;
+  /** Winning candidate's trace — used only to label shrunk elements in the debug overlay. */
+  trace?: DecisionTrace | undefined;
+  /** Overlay safe-area outline + per-element zone/shrink bounding boxes (§4.7 "DevTools for Ads"). */
+  showDebug?: boolean;
   maxWidth?: number;
   maxHeight?: number;
   frame?: StageFrame;
@@ -93,6 +104,8 @@ export function SurfaceStage({
   surface,
   elements,
   specById,
+  trace,
+  showDebug = false,
   maxWidth = 900,
   maxHeight = 620,
   frame = "none",
@@ -123,6 +136,9 @@ export function SurfaceStage({
               {visible.map((el) => (
                 <StageElement key={el.id} el={el} spec={specById?.get(el.id)} />
               ))}
+              {showDebug && (
+                <DebugOverlay surface={surface} elements={elements} trace={trace} />
+              )}
             </div>
           </div>
         </div>
