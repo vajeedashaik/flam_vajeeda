@@ -31,7 +31,7 @@ Requires Node 18+.
 ```bash
 npm install       # install dependencies
 npm run dev       # start the Vite dev server (http://localhost:5173)
-npm run test      # run the full Vitest suite (86 tests)
+npm run test      # run the full Vitest suite (93 tests)
 npm run build     # type-check (tsc --noEmit) + production build to dist/
 npm run preview   # serve the production build locally (http://localhost:4173)
 ```
@@ -115,7 +115,8 @@ feature numbers (`§4.x`).
 | Performance-aware scoring term | `renderCost` sub-score (element count + mean size) breaks near-ties toward cheaper-to-render layouts | Constraint resolution algorithm (35%); §4.9 |
 | Lightweight declarative constraints | safeArea, `minSize`, `minTapTarget`, `brandRules.locked` are declared on the spec/surface and read by the scorer — not hardcoded in the resolver | TypeScript & architecture (20%); §4.4 / §4.6 |
 | Priority degradation cascade | Shrink toward minSize, then drop lowest-priority-first in a strict monotone cascade; `visibility:"always"` elements never dropped | Constraint resolution algorithm (35%); core req: "priority-based degradation, not overlap/clip"; §4.5 |
-| Decision trace + Layout Debugger panel | Per-element plain-language reasoning ("shrunk 7%", "dropped — priority 5…") updating live on surface change | Code quality (10%); §4.7 |
+| Grow into slack | Elements can size up to 1.4× their preferred size on a strategy's "free" axis when a surface offers genuine extra room, not just shrink to fit less; brand-locked elements exempt | Constraint resolution algorithm (35%); Layout correctness (25%); §4c |
+| Decision trace + Layout Debugger panel | Per-element plain-language reasoning ("shrunk 7%", "grew 40%", "dropped — priority 5…") updating live on surface change | Code quality (10%); §4.7 |
 | Layout Counterfactuals panel | Every candidate + score; click a loser for a generated sentence naming the sub-score gap (`explainLoss`) | Code quality (10%); §4.7b |
 | Layout Health Check panel | Pass/warn/fail checklist derived from the same 6 sub-scores | Code quality (10%); Example application (10%); §4.7c |
 | Side-by-side multi-surface view | All 5 surfaces resolved and rendered at once in device-style frames | Layout correctness across surfaces (25%); §4.16 |
@@ -265,7 +266,7 @@ src/
     self-healing-scenario.ts adversarial spec + tiny surface (5.2)
     render-dom.ts            deliberate stub (framework-agnostic renderer seam)
     spec.invalid-example.ts.txt   compile-error demonstration (excluded from build)
-    __tests__/               11 Vitest suites, 86 tests
+    __tests__/               11 Vitest suites, 93 tests
   components/
     SurfaceStage.tsx         the one ResolvedLayout → pixels renderer
     LayoutDebugger.tsx       explainability panel 1
@@ -276,8 +277,8 @@ src/
     useCountUp.ts             presentation-only number animation hook
   styles/
     theme.css                design system — glassmorphism + claymorphism,
-                              dark-first with a light toggle, CSS custom
-                              properties, prefers-reduced-motion aware
+                              Nykaa-branded (hot-pink accent, white cards),
+                              light only, prefers-reduced-motion aware
   App.tsx main.tsx
 phase1.md … phase6.md        the phase specifications this was built against
 ARCHITECTURE.md
@@ -285,5 +286,6 @@ ARCHITECTURE.md
 
 The UI is a presentation layer only: all styling lives in `styles/theme.css`
 plus `className`s on component wrappers. No `src/core/**` file is imported by a
-style concern, and the resolver output is unchanged. Theme choice (system /
-light / dark) is toggled from the nav and persisted to `localStorage`.
+style concern, and the resolver output is unchanged. The site is styled to
+match Nykaa's identity throughout (nav, buttons, cards, the ad canvas itself)
+— one light theme, no dark mode or toggle.
