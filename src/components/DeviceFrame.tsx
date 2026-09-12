@@ -44,8 +44,18 @@ const TV_MIN_RATIO = 2.5;
  * dark screen background with letterbox bars on either side — exactly how a
  * real TV shows a non-native-aspect source, rather than distorting the
  * chassis into a shape no TV has ever had.
+ *
+ * Deliberately modest (not a strict 16:9) — the goal is "unmistakably
+ * landscape," not "exactly broadcast spec." A stricter ratio forces more
+ * pillarboxing for the exact same portrait content, which looks worse, not
+ * more accurate, for a demo whose job is showing the AD, not simulating a
+ * real television's letterbox behaviour.
  */
-const MIN_TV_ASPECT = 16 / 9;
+const MIN_TV_ASPECT = 1.35;
+
+/** Height reserved for the top/bottom chrome bars, so the WHOLE device
+ *  (bars included) fits the caller's maxHeight budget, not just the screen. */
+const TV_CHROME_HEIGHT = 46;
 
 /** Auto-detection is aspect-ratio-driven only — never a lookup by surface id/name. */
 function effectiveDeviceFor(
@@ -99,32 +109,58 @@ export function DeviceFrame({
   }
 
   if (effective === "tv") {
-    // Mirror SurfaceStage's own fit-scale so the chassis width is computed
-    // from the SAME rendered pixel size, not a separate guess.
-    const scale = Math.min(1, maxWidth / surface.width, maxHeight / surface.height);
-    const scaledW = surface.width * scale;
-    const scaledH = surface.height * scale;
-    const frameWidth = Math.max(scaledW, scaledH * MIN_TV_ASPECT);
-    const isPillarboxed = frameWidth > scaledW + 0.5;
+    // The whole chassis — not just the screen — must fit the caller's
+    // maxWidth × maxHeight budget. Deriving chassis width from the surface's
+    // OWN scaled height (the previous approach) let a tall portrait surface
+    // balloon the chassis width far past that budget while still showing
+    // almost nothing but pillarbox: a 390×844 phone at maxHeight 620 scales to
+    // ~620px tall, and 620 × 16:9 alone is already 1100px wide — well beyond
+    // any reasonable layout. Instead: first fit a landscape BOX (at least
+    // MIN_TV_ASPECT, wider if the surface itself is already wider) inside the
+    // ORIGINAL budget — reserving room for the chrome bars — then fit the
+    // real surface inside THAT box. The chassis never exceeds what was asked
+    // for; only the screen-vs-pillarbox split inside it varies with content.
+    const screenBudgetH = Math.max(60, maxHeight - TV_CHROME_HEIGHT);
+    const targetAspect = Math.max(MIN_TV_ASPECT, surface.width / surface.height);
+
+    let chassisW = maxWidth;
+    let screenH = chassisW / targetAspect;
+    if (screenH > screenBudgetH) {
+      screenH = screenBudgetH;
+      chassisW = screenH * targetAspect;
+    }
+
+    const contentScale = Math.min(1, chassisW / surface.width, screenH / surface.height);
+    const isPillarboxed = contentScale * surface.width < chassisW - 0.5;
 
     return (
       <div className="ale-device ale-device--tv" data-testid="device-frame" data-device="tv">
-        <div className="ale-tv-frame" style={{ width: frameWidth }}>
+        <div className="ale-tv-frame" style={{ width: chassisW }}>
           <div className="ale-tv-topbar">
             <span className="ale-tv-live">
               <span className="ale-tv-dot" /> LIVE BROADCAST
             </span>
             <span className="ale-tv-tag">
-              {surface.width}×{surface.height} · CH 07
+              {isPillarboxed
+                ? `${surface.width}×${surface.height} pillarboxed — portrait content on a landscape TV`
+                : `${surface.width}×${surface.height} · CH 07`}
             </span>
           </div>
           <div
             className="ale-tv-screen"
             data-testid="tv-screen"
             data-pillarboxed={isPillarboxed}
-            style={{ width: frameWidth, justifyContent: "center" }}
+            style={{ width: chassisW, height: screenH, justifyContent: "center", alignItems: "center" }}
           >
-            {stage}
+            <SurfaceStage
+              surface={surface}
+              elements={elements}
+              specById={specById}
+              trace={trace}
+              showDebug={showDebug}
+              maxWidth={chassisW}
+              maxHeight={screenH}
+            />
           </div>
           <div className="ale-tv-bottombar">
             <span className="ale-tv-brand">ADAPTIVE LAYOUT ENGINE</span>
