@@ -503,14 +503,15 @@ const EMERGENCY_MIN_SIZE: SizeConstraint = { width: 24, height: 16 };
 
 /**
  * Last-resort fallback (§10 / stress-lab "nothing fits" fix). Same geometry as
- * `verticalStack`, but every `visibility:"always"` element's preferred AND min
- * size are both replaced with `EMERGENCY_MIN_SIZE` — not just the acceptance
- * floor, but the TARGET size — so each always-element claims only a small,
- * fair share of space instead of greedily consuming everything available
- * (which would just push the next always-element into the same "no room"
- * cascade it was meant to rescue). Only `alwaysVisible` requests are touched;
- * everything else keeps its normal preferred/min and cascades exactly as it
- * would in `verticalStack`.
+ * `verticalStack` (or `horizontalSplit` on a wide box — see below), but every
+ * `visibility:"always"` element's preferred AND min size are both replaced
+ * with `EMERGENCY_MIN_SIZE` — not just the acceptance floor, but the TARGET
+ * size — so each always-element claims only a small, fair share of space
+ * instead of greedily consuming everything available (which would just push
+ * the next always-element into the same "no room" cascade it was meant to
+ * rescue). Only `alwaysVisible` requests are touched; everything else keeps
+ * its normal preferred/min and cascades exactly as it would in the matching
+ * normal strategy.
  *
  * The relaxed preferred/min is applied UNCONDITIONALLY to every always-visible
  * element — not only when the normal size wouldn't fit — so this candidate's
@@ -518,11 +519,27 @@ const EMERGENCY_MIN_SIZE: SizeConstraint = { width: 24, height: 16 };
  * That is what keeps it losing on every surface that never needed rescuing:
  * `constraintViolationsScore` reads each element's REAL declared minSize from
  * the graph node (unaffected by this override) and penalizes every
- * always-element here as "forced below minSize," a penalty `vertical-stack`
- * never carries when it can place things at their real size. Only when the
- * other four candidates ALL hard-fail to 0 — because a surface can't fit an
- * always-element even at its real, non-relaxed size — does this candidate's
- * genuine, non-zero (if penalized) score become the highest, and win.
+ * always-element here as "forced below minSize," a penalty the matching
+ * normal strategy never carries when it can place things at their real size.
+ * Only when the other four candidates ALL hard-fail to 0 — because a surface
+ * can't fit an always-element even at its real, non-relaxed size — does this
+ * candidate's genuine, non-zero (if penalized) score become the highest, and
+ * win.
+ *
+ * §7.7 (found via live testing, not theorized): a STRICTLY vertical cascade
+ * needs `N × EMERGENCY_MIN_SIZE.height` of vertical room for N always-visible
+ * elements — with 4 of them (headline, cta, price, logo) that is 64px, which
+ * a standard 320×50 mobile banner (a real, common ad size) does not have,
+ * even though it has ample WIDTH to lay those same 4 elements out in a row.
+ * A pure column-only floor was leaving a realistic, everyday ad size
+ * hard-failing for no good reason. So — mirroring the existing
+ * vertical-stack/horizontal-split duality — the emergency floor now cascades
+ * along whichever axis the box actually offers more of: a wide-or-square box
+ * (width ≥ height) lays always-elements out in a ROW (mirroring
+ * `horizontalSplit`'s geometry); a tall box stacks them in a COLUMN
+ * (mirroring `verticalStack`'s). Only the DIRECTION changes; the relaxed-size
+ * mechanism, the scoring penalty that keeps it losing when unneeded, and the
+ * non-overlap/in-bounds guarantees are identical either way.
  */
 function emergencyFit(requests: PlacementRequest[], box: Box): PlacementOutcome {
   const relaxed = requests.map((r) =>
@@ -530,13 +547,21 @@ function emergencyFit(requests: PlacementRequest[], box: Box): PlacementOutcome 
       ? { ...r, preferred: EMERGENCY_MIN_SIZE, min: EMERGENCY_MIN_SIZE }
       : r,
   );
-  // Same growAxes as vertical-stack ({ width: true, height: false }) — this is
-  // deliberately vertical-stack's geometry PLUS the relaxed floor, not a
-  // second, differently-configured engine. Matching it exactly is what makes
-  // "resolves identically to vertical-stack when the floor never triggers"
-  // (asserted in candidates.test.ts) actually true, rather than an
-  // unrelated growth-setting difference accidentally changing the outcome
-  // even on surfaces with no emergency to handle.
+
+  if (box.width > box.height) {
+    return placeElementsInOrder(
+      relaxed,
+      box,
+      ({ placed }) => {
+        const cursorX = placed.reduce((maxX, e) => Math.max(maxX, e.x + e.width), box.x);
+        const remaining = box.x + box.width - cursorX;
+        if (remaining <= 0) return null;
+        return { x: cursorX, y: box.y, maxWidth: remaining, maxHeight: box.height };
+      },
+      { width: false, height: true },
+    );
+  }
+
   return placeElementsInOrder(
     relaxed,
     box,
