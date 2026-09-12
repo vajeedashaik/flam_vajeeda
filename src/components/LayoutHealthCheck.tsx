@@ -5,7 +5,7 @@
  * ScoreBreakdown. No new scoring logic — just presentation thresholds on top of
  * the existing numbers.
  *
- * THRESHOLDS (applied identically to all six sub-scores, each 0-100):
+ * THRESHOLDS (applied identically to all seven sub-scores, each 0-100):
  *   score ≥ 85  → ✓  pass
  *   score ≥ 60  → ⚠  warn
  *   else        → ✕  fail
@@ -24,6 +24,7 @@ const ROWS: { key: keyof Omit<ScoreBreakdown, "overall">; label: string }[] = [
   { key: "tapTargetCompliance", label: "Tap-target compliance" },
   { key: "contextFit", label: "Context fit" },
   { key: "renderCost", label: "Render efficiency" },
+  { key: "adjacencyFit", label: "Element grouping" },
 ];
 
 function verdict(score: number): { icon: string; cls: string } {
