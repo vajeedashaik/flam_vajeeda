@@ -524,6 +524,11 @@ body::before {
 .ale-chip--accent { color: var(--on-accent); background: var(--accent-grad); box-shadow: none; }
 
 /* ---- SurfaceStage frames --------------------------------------------------- */
+/* Centers a single preview (device frame or bare stage) in its container.
+   Without this, a narrow phone/kiosk preview sits flush-left in a much wider
+   panel on any normal desktop viewport, leaving a large, lopsided dead zone
+   on the right that reads as broken rather than intentional. */
+.ale-stage-wrap { display: flex; justify-content: center; }
 .ale-stage { margin: 0; }
 .ale-stage-frame { display: inline-block; }
 .ale-stage-frame[data-frame="phone"]  { padding: 12px; border-radius: 34px; }
