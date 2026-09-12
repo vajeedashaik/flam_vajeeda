@@ -119,35 +119,36 @@ describe("resolveLayout — the SAME code path across all five sample surfaces",
 });
 
 /**
- * §7.7 — direct user feedback: "no matter the screen size, we should be able
- * to display all 4 infos in some way" (headline, cta, price, logo), and the
- * product photo should be the one thing sacrificed first, not any of those
- * four. price and logo were promoted to `visibility: "always"` (matching
- * headline/cta) and product-image's priority moved to last (5, was 3) so it
- * is always the one dropped/shrunk hardest when a surface can't fit
- * everything. This surface (150×150) is deliberately picked to still
- * demonstrate a real drop: too small for the photo's own declared minSize
- * (96×96) alongside the four always-elements, but big enough for all four to
- * survive at emergency-fit's floor.
+ * §7.8 — direct follow-up feedback reversed §7.7's priority order: "the
+ * product image is our highlight... it should be visible in most cases even
+ * if others have to be dropped." product-image is now `visibility: "always"`
+ * (priority 3, right after headline/cta) and price/logo are the two
+ * `"degradable"`/`"decorative-only"` elements allowed to give way under real
+ * space pressure. This surface (70×70) is small enough to force BOTH price
+ * and logo to drop while headline, cta, AND the product photo all still
+ * survive (at emergency-fit's floor) — the clearest demonstration that the
+ * highlight is protected even when other content isn't.
  */
-describe("resolveLayout — the 4 'info' elements survive on a surface too small for everything (150×150)", () => {
+describe("resolveLayout — the product photo survives even when price and logo don't (70×70)", () => {
   const tiny = defineSurface({
     ...surfaceProfiles.retailKiosk,
     id: "retailKioskShrunk",
-    name: "kiosk shrunk 150x150",
-    width: 150,
-    height: 150,
+    name: "kiosk shrunk 70x70",
+    width: 70,
+    height: 70,
     safeArea: { top: 0, right: 0, bottom: 0, left: 0 },
   });
   const { layout, trace } = resolveLayout(graph, resolveContext(tiny), tiny);
 
-  it("drops product-image — now the lowest-priority, only-degradable element — instead of any of the 4 info pieces", () => {
-    const image = layout.elements.find((e) => e.id === "product-image");
-    expect(image?.visible).toBe(false);
+  it("drops price and logo — the two degradable elements — instead of the product photo", () => {
+    for (const id of ["price", "logo"]) {
+      const e = layout.elements.find((el) => el.id === id);
+      expect(e?.visible, `${id} should be dropped`).toBe(false);
+    }
   });
 
-  it("keeps headline, cta, price, AND logo all visible — none of the 4 infos disappear", () => {
-    for (const id of ["headline", "cta", "price", "logo"]) {
+  it("keeps headline, cta, AND product-image (the highlight) all visible", () => {
+    for (const id of ["headline", "cta", "product-image"]) {
       const e = layout.elements.find((el) => el.id === id);
       expect(e?.visible, `${id} should stay visible`).toBe(true);
       expect(e!.width).toBeGreaterThan(0);
@@ -155,10 +156,13 @@ describe("resolveLayout — the 4 'info' elements survive on a surface too small
     }
   });
 
-  it("records the drop in the trace's perElementNotes", () => {
-    expect(
-      trace.perElementNotes.some((n) => n.toLowerCase().includes("product-image")),
-    ).toBe(true);
+  it("records the drops in the trace's perElementNotes", () => {
+    for (const id of ["price", "logo"]) {
+      expect(
+        trace.perElementNotes.some((n) => n.toLowerCase().includes(id)),
+        `expected a note mentioning ${id}`,
+      ).toBe(true);
+    }
   });
 
   it("still produces zero overlaps / out-of-bounds among whatever stays visible", () => {
