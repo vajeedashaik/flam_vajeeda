@@ -118,32 +118,46 @@ describe("resolveLayout — the SAME code path across all five sample surfaces",
   }
 });
 
-describe("resolveLayout — priority-based degradation on a shrunk retail kiosk (200×200)", () => {
+/**
+ * §7.7 — direct user feedback: "no matter the screen size, we should be able
+ * to display all 4 infos in some way" (headline, cta, price, logo), and the
+ * product photo should be the one thing sacrificed first, not any of those
+ * four. price and logo were promoted to `visibility: "always"` (matching
+ * headline/cta) and product-image's priority moved to last (5, was 3) so it
+ * is always the one dropped/shrunk hardest when a surface can't fit
+ * everything. This surface (150×150) is deliberately picked to still
+ * demonstrate a real drop: too small for the photo's own declared minSize
+ * (96×96) alongside the four always-elements, but big enough for all four to
+ * survive at emergency-fit's floor.
+ */
+describe("resolveLayout — the 4 'info' elements survive on a surface too small for everything (150×150)", () => {
   const tiny = defineSurface({
     ...surfaceProfiles.retailKiosk,
     id: "retailKioskShrunk",
-    name: "kiosk shrunk 200x200",
-    width: 200,
-    height: 200,
+    name: "kiosk shrunk 150x150",
+    width: 150,
+    height: 150,
     safeArea: { top: 0, right: 0, bottom: 0, left: 0 },
   });
   const { layout, trace } = resolveLayout(graph, resolveContext(tiny), tiny);
 
-  it("drops the lowest-priority branding element (logo, priority 5)", () => {
-    const logo = layout.elements.find((e) => e.id === "logo");
-    expect(logo?.visible).toBe(false);
+  it("drops product-image — now the lowest-priority, only-degradable element — instead of any of the 4 info pieces", () => {
+    const image = layout.elements.find((e) => e.id === "product-image");
+    expect(image?.visible).toBe(false);
   });
 
-  it("keeps the action element (cta) visible and intact", () => {
-    const cta = layout.elements.find((e) => e.id === "cta");
-    expect(cta?.visible).toBe(true);
-    expect(cta!.width).toBeGreaterThan(0);
-    expect(cta!.height).toBeGreaterThan(0);
+  it("keeps headline, cta, price, AND logo all visible — none of the 4 infos disappear", () => {
+    for (const id of ["headline", "cta", "price", "logo"]) {
+      const e = layout.elements.find((el) => el.id === id);
+      expect(e?.visible, `${id} should stay visible`).toBe(true);
+      expect(e!.width).toBeGreaterThan(0);
+      expect(e!.height).toBeGreaterThan(0);
+    }
   });
 
   it("records the drop in the trace's perElementNotes", () => {
     expect(
-      trace.perElementNotes.some((n) => n.toLowerCase().includes("logo")),
+      trace.perElementNotes.some((n) => n.toLowerCase().includes("product-image")),
     ).toBe(true);
   });
 
