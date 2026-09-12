@@ -69,6 +69,18 @@ function isNonNegativeNumber(value: unknown): value is number {
 }
 
 /**
+ * Formats a value for an error message. `JSON.stringify(NaN)` returns the
+ * STRING `"null"` (JSON has no NaN) — actively misleading in a validation
+ * message when the caller got here via `Number(someBadInput)` (e.g. a live
+ * form field left empty or given non-numeric text): "invalid width null"
+ * reads as "you gave me literal null", not "that wasn't a number at all".
+ */
+function describeInvalid(value: unknown): string {
+  if (typeof value === "number" && Number.isNaN(value)) return "NaN";
+  return JSON.stringify(value);
+}
+
+/**
  * Construct a validated {@link SurfaceProfile}.
  *
  * Validates at construction time:
@@ -91,7 +103,7 @@ export function defineSurface(config: SurfaceConfig): SurfaceProfile {
 
   if (!isPositiveNumber(config.width)) {
     throw new SurfaceValidationError(
-      `Surface "${surfaceId}": invalid width ${JSON.stringify(
+      `Surface "${surfaceId}": invalid width ${describeInvalid(
         config.width,
       )}. Width must be a positive number.`,
     );
@@ -99,7 +111,7 @@ export function defineSurface(config: SurfaceConfig): SurfaceProfile {
 
   if (!isPositiveNumber(config.height)) {
     throw new SurfaceValidationError(
-      `Surface "${surfaceId}": invalid height ${JSON.stringify(
+      `Surface "${surfaceId}": invalid height ${describeInvalid(
         config.height,
       )}. Height must be a positive number.`,
     );
@@ -107,7 +119,7 @@ export function defineSurface(config: SurfaceConfig): SurfaceProfile {
 
   if (config.minTapTarget !== undefined && !isPositiveNumber(config.minTapTarget)) {
     throw new SurfaceValidationError(
-      `Surface "${surfaceId}": invalid minTapTarget ${JSON.stringify(
+      `Surface "${surfaceId}": invalid minTapTarget ${describeInvalid(
         config.minTapTarget,
       )}. minTapTarget must be a positive number (px).`,
     );
@@ -115,7 +127,7 @@ export function defineSurface(config: SurfaceConfig): SurfaceProfile {
 
   if (config.minTextSize !== undefined && !isPositiveNumber(config.minTextSize)) {
     throw new SurfaceValidationError(
-      `Surface "${surfaceId}": invalid minTextSize ${JSON.stringify(
+      `Surface "${surfaceId}": invalid minTextSize ${describeInvalid(
         config.minTextSize,
       )}. minTextSize must be a positive number (px).`,
     );
@@ -126,7 +138,7 @@ export function defineSurface(config: SurfaceConfig): SurfaceProfile {
     !isPositiveNumber(config.attentionWindow)
   ) {
     throw new SurfaceValidationError(
-      `Surface "${surfaceId}": invalid attentionWindow ${JSON.stringify(
+      `Surface "${surfaceId}": invalid attentionWindow ${describeInvalid(
         config.attentionWindow,
       )}. attentionWindow must be a positive number (seconds).`,
     );
@@ -137,7 +149,7 @@ export function defineSurface(config: SurfaceConfig): SurfaceProfile {
     !isPositiveNumber(config.viewingDistance)
   ) {
     throw new SurfaceValidationError(
-      `Surface "${surfaceId}": invalid viewingDistance ${JSON.stringify(
+      `Surface "${surfaceId}": invalid viewingDistance ${describeInvalid(
         config.viewingDistance,
       )}. A numeric viewingDistance must be a positive number (cm).`,
     );
@@ -147,7 +159,7 @@ export function defineSurface(config: SurfaceConfig): SurfaceProfile {
     for (const edge of ["top", "right", "bottom", "left"] as const) {
       if (!isNonNegativeNumber(config.safeArea[edge])) {
         throw new SurfaceValidationError(
-          `Surface "${surfaceId}": invalid safeArea.${edge} ${JSON.stringify(
+          `Surface "${surfaceId}": invalid safeArea.${edge} ${describeInvalid(
             config.safeArea[edge],
           )}. safeArea insets must be non-negative numbers.`,
         );
