@@ -11,13 +11,23 @@
 import { useState } from "react";
 import { productAd } from "../core/sample-data";
 import {
+  categorizeStressDetail,
   DEGRADED_SCORE_THRESHOLD,
   generateRandomSurfaces,
   runStressTest,
+  summarizeProblems,
   type StressResult,
 } from "../core/stress-lab";
 import type { SurfaceProfile } from "../core/surfaces";
 import { useCountUp } from "./useCountUp";
+
+/** Short chip label for each problem category — matches the row's own icon. */
+const CATEGORY_TAG: Record<string, string> = {
+  "invariant-violation": "⚠ invariant broken",
+  "nothing-fits": "nothing fits",
+  "always-element-dropped": "must-keep dropped",
+  "quality-floor": "sparse but valid",
+};
 
 const SAMPLE_COUNT = 200;
 
@@ -130,6 +140,43 @@ export function StressLab({
             </p>
           )}
 
+          {problems.length > 0 && (
+            <div data-testid="stress-conclusion" style={{ marginTop: 14 }}>
+              <h3 className="ale-h3">
+                Conclusion — why these {problems.length} landed below the bar
+              </h3>
+              <p className="ale-note" style={{ maxWidth: 640 }}>
+                Every degraded/failed entry is grouped by root cause below, not
+                just counted — a low score means something different on a
+                surface where nothing fits than on one that's merely sparse.
+              </p>
+              <ul className="ale-list">
+                {summarizeProblems(result.details).map((s) => (
+                  <li
+                    key={s.category}
+                    className="ale-row ale-row--ok"
+                    data-testid="stress-conclusion-row"
+                    data-category={s.category}
+                  >
+                    <span className="ic" aria-hidden>
+                      {s.category === "invariant-violation"
+                        ? "❌"
+                        : s.category === "quality-floor"
+                          ? "⚠️"
+                          : "ℹ️"}
+                    </span>
+                    <span>
+                      <b>
+                        {s.count} of {problems.length}
+                      </b>{" "}
+                      — <b>{s.label}</b>: {s.explanation}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           <h3 className="ale-h3" style={{ marginTop: 14 }}>
             Degraded / failed entries ({problems.length}) — click one to load it
             into the main canvas
@@ -147,6 +194,7 @@ export function StressLab({
                     className="ale-problem"
                     data-testid="stress-problem-row"
                     data-outcome={d.outcome}
+                    data-category={categorizeStressDetail(d) ?? ""}
                     onClick={() => onInspect(d.surface)}
                   >
                     <span>
@@ -158,6 +206,9 @@ export function StressLab({
                       >
                         {d.outcome}
                       </b>{" "}
+                      <span className="ale-chip" style={{ fontSize: "0.62rem" }}>
+                        {CATEGORY_TAG[categorizeStressDetail(d) ?? ""] ?? ""}
+                      </span>{" "}
                       · {d.surface.width}×{d.surface.height} · score{" "}
                       {d.overallScore}
                       {d.reason ? ` · ${d.reason}` : ""}
