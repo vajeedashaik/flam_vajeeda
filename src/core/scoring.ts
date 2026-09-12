@@ -41,7 +41,17 @@ export interface ScoreBreakdown {
    * `computeAdjacencyFit` for the exact distance/normalization formula.
    */
   adjacencyFit: number;
-  /** Weighted sum of the seven sub-scores, or 0 on a hard-fail. */
+  /**
+   * 0-100. How much this candidate reads as ONE connected ad rather than
+   * independent components scattered across the surface with dead space
+   * between them — e.g. a headline in one corner, a price in another, a logo
+   * in a third, with a large empty void in the middle. Measures every VISIBLE
+   * element together (not just declared graph pairs): the fraction of the
+   * smallest bounding box spanning all of them that their own areas actually
+   * fill. See `compositionCohesionScore` for the exact formula.
+   */
+  compositionCohesion: number;
+  /** Weighted sum of the eight sub-scores, or 0 on a hard-fail. */
   overall: number;
 }
 
@@ -58,29 +68,37 @@ export interface ScoreBreakdown {
  * THIS surface's real-world context, never whether a layout is valid at all.
  * renderCost is only a light tie-breaker.
  *
- * §7.1: adjacencyFit is new. It is weighted at 0.10 — deliberately in the same
- * tier as contextFit/visualBalance, not a light tie-breaker like renderCost —
- * because the whole point of this phase is that the graph's proximity data
- * should be able to actually change which candidate wins (verified live: on
- * a wide, roomy sample surface this shifts the winner away from
- * `overlay-safe-margins`'s far-corners arrangement — see ARCHITECTURE.md
- * §4e). To make room for it, every other weight was trimmed by a small,
- * roughly proportional amount (constraintViolations 0.32→0.30,
- * priorityPreservation 0.28→0.25, tapTargetCompliance 0.14→0.13, contextFit
- * 0.10→0.09, visualBalance 0.10→0.08, renderCost 0.06→0.05) rather than
- * zeroing out any one of them — adjacencyFit earns a real say without being
- * allowed to dominate the hard-constraint scores, and it NEVER overrides the
- * separate hard-fail rule below (overlap / out-of-bounds / dropped-always /
- * priority-inversion still force `overall = 0` regardless of this weight).
+ * §7.1: adjacencyFit rewards specific graph-declared pairs (e.g. price ↔ cta)
+ * for landing close together.
+ *
+ * §7.4: compositionCohesion goes further — it judges the WHOLE visible set
+ * together, not just one declared pair, because a real ad reads as a single
+ * connected composition, never as independent components scattered into
+ * separate corners with a dead void between them (a headline in one corner, a
+ * logo in another, nothing tying them together as the same ad). It is
+ * weighted the heaviest of the "which arrangement is best" tier — 0.16, above
+ * even contextFit — specifically so a strategy that scatters elements apart
+ * cannot out-score one that keeps the ad together no matter how clean its
+ * other numbers are (this is exactly what let `overlay-safe-margins` keep
+ * winning before this change: excellent constraintViolations/priority
+ * numbers on a fundamentally scattered composition). To fund both, every
+ * other weight was trimmed again, proportionally (constraintViolations
+ * 0.30→0.27, priorityPreservation 0.25→0.22, tapTargetCompliance 0.13→0.11,
+ * contextFit 0.09→0.07, visualBalance 0.08→0.06, renderCost 0.05→0.03,
+ * adjacencyFit 0.10→0.08) rather than zeroing any one of them out. Neither
+ * new term ever overrides the separate hard-fail rule below (overlap /
+ * out-of-bounds / dropped-always / priority-inversion still force
+ * `overall = 0` regardless of these weights).
  */
 const WEIGHTS = {
-  constraintViolations: 0.3,
-  priorityPreservation: 0.25,
-  tapTargetCompliance: 0.13,
-  contextFit: 0.09,
-  visualBalance: 0.08,
-  renderCost: 0.05,
-  adjacencyFit: 0.1,
+  constraintViolations: 0.27,
+  priorityPreservation: 0.22,
+  tapTargetCompliance: 0.11,
+  contextFit: 0.07,
+  visualBalance: 0.06,
+  renderCost: 0.03,
+  adjacencyFit: 0.08,
+  compositionCohesion: 0.16,
 } as const;
 
 /** Points removed from constraintViolations per soft violation found. */
@@ -352,6 +370,59 @@ export function computeAdjacencyFit(
 }
 
 /**
+ * compositionCohesion sub-score (§7.4). Answers a different, broader question
+ * than `adjacencyFit`: not "are these two DECLARED-related elements close,"
+ * but "does the WHOLE visible set read as one ad." A real ad's elements —
+ * headline, image, price, cta, logo — are always part of one connected
+ * composition; none of them ever sits alone in a far corner while the rest of
+ * the ad is somewhere else with a large empty gap in between. This sub-score
+ * catches exactly that failure mode regardless of which elements the graph
+ * happens to declare a proximity edge between (adjacencyFit only ever looks
+ * at ONE pair — price/cta — so a candidate could satisfy it perfectly while
+ * still leaving the logo and the image isolated in opposite corners; this
+ * sub-score looks at every visible element together, every time).
+ *
+ * ALGORITHM
+ *  1. Fewer than 2 visible elements → nothing can be "scattered apart from
+ *     something else" → neutral 100.
+ *  2. Compute the smallest axis-aligned bounding box that encloses every
+ *     VISIBLE element (their union's bounding box) — this is the footprint
+ *     the ad as a whole actually occupies.
+ *  3. density = (sum of each visible element's own area) / (that bounding
+ *     box's area). This is deliberately NOT "how much of the surface is
+ *     used" (a legitimate full-bleed ad — e.g. a wide banner with a headline
+ *     on the left edge and a logo on the right edge, filling the strip
+ *     efficiently — should NOT be penalized just for being wide). It is
+ *     "how much of the ad's OWN footprint is actually filled with content
+ *     versus empty gap" — four small elements pinned to the four corners of
+ *     a huge surface have a huge footprint but tiny total content area, so
+ *     density (and the score) is very low, exactly flagging the "big dead
+ *     void in the middle" complaint. A tightly stacked or efficiently packed
+ *     composition has a footprint close to its own content area, so density
+ *     approaches 1.
+ *  4. Score = `round(min(1, density) × 100)`. No unexplained magic numbers —
+ *     a plain content-area-to-footprint ratio.
+ *
+ * Pure and deterministic: depends only on the candidate's own placed
+ * geometry — no graph, no surface, no context.
+ */
+export function computeCompositionCohesion(candidate: Candidate): number {
+  const vis = visible(candidate);
+  if (vis.length < 2) return 100;
+
+  const minX = Math.min(...vis.map((e) => e.x));
+  const minY = Math.min(...vis.map((e) => e.y));
+  const maxX = Math.max(...vis.map((e) => e.x + e.width));
+  const maxY = Math.max(...vis.map((e) => e.y + e.height));
+
+  const footprintArea = (maxX - minX) * (maxY - minY) || 1;
+  const contentArea = vis.reduce((sum, e) => sum + e.width * e.height, 0);
+  const density = Math.min(1, contentArea / footprintArea);
+
+  return Math.round(density * 100);
+}
+
+/**
  * tapTargetCompliance sub-score. 100 when the surface has no minTapTarget or no
  * interactive element is visible; otherwise the percentage of visible
  * interactive elements that meet the minimum on both axes.
@@ -478,6 +549,7 @@ export function scoreCandidate(
     renderCost: renderCostScore(candidate, surface),
     contextFit: contextFitScore(candidate, context),
     adjacencyFit: computeAdjacencyFit(candidate, graph, surface),
+    compositionCohesion: computeCompositionCohesion(candidate),
   };
 
   const hardFail =
@@ -494,7 +566,8 @@ export function scoreCandidate(
     sub.contextFit * WEIGHTS.contextFit +
     sub.visualBalance * WEIGHTS.visualBalance +
     sub.renderCost * WEIGHTS.renderCost +
-    sub.adjacencyFit * WEIGHTS.adjacencyFit;
+    sub.adjacencyFit * WEIGHTS.adjacencyFit +
+    sub.compositionCohesion * WEIGHTS.compositionCohesion;
 
   return { ...sub, overall: hardFail ? 0 : Math.round(weighted) };
 }
