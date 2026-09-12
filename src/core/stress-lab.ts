@@ -50,8 +50,85 @@ export interface StressDetail {
   outcome: StressOutcome;
   /** Winning candidate's overall score (0-100). */
   overallScore: number;
+  /** How many of the spec's elements survived in the winning candidate. */
+  visibleCount: number;
+  /** Total elements in the spec (visible or dropped). */
+  elementCount: number;
   /** Present for degraded/failed entries — why it landed in that tier. */
   reason?: string;
+}
+
+/**
+ * WHY a degraded/failed entry landed there — computed purely from data
+ * `runStressTest` already produces, so it never needs to know this spec's
+ * specific element ids/roles (matches every other file's "no hardcoded ids"
+ * rule). See `CATEGORY_META` for the plain-language explanation of each.
+ */
+export type ProblemCategory =
+  | "invariant-violation"
+  | "nothing-fits"
+  | "always-element-dropped"
+  | "quality-floor";
+
+export function categorizeStressDetail(
+  detail: StressDetail,
+): ProblemCategory | null {
+  if (detail.outcome === "passed") return null;
+  if (detail.outcome === "failed") return "invariant-violation";
+  if (detail.visibleCount === 0) return "nothing-fits";
+  if (detail.overallScore === 0) return "always-element-dropped";
+  return "quality-floor";
+}
+
+const CATEGORY_META: Record<
+  ProblemCategory,
+  { label: string; explanation: string }
+> = {
+  "invariant-violation": {
+    label: "Hard invariant actually broken",
+    explanation:
+      "An element genuinely overlapped another or was clipped off-surface end-to-end — this is supposed to be structurally impossible (every strategy's shared placement engine re-checks both invariants before accepting a placement). A non-zero count here means that guarantee has a real hole worth investigating immediately, not a tuning issue.",
+  },
+  "nothing-fits": {
+    label: "Nothing fits at all",
+    explanation:
+      "Not even the single highest-priority element could be placed by any strategy — some axis of the surface is smaller than what the ad's own declared minimum sizes require, so every element cascades to dropped, always-visible ones included. Scoring this 0 is correct: there is no valid layout to prefer over another, so the pipeline should not pretend one exists.",
+  },
+  "always-element-dropped": {
+    label: "A must-keep element had to be dropped",
+    explanation:
+      'At least one element fit, but the surface was too small to also keep every element the spec marks visibility:"always" — the resolver refuses to call that combination valid, scoring it 0 rather than quietly shipping an ad missing something the spec said must survive.',
+  },
+  "quality-floor": {
+    label: "Valid, but a real quality ceiling",
+    explanation:
+      "A genuinely valid, non-overlapping, in-bounds layout was produced with every must-keep element intact — it is simply sparse. On a surface this constrained, keeping only a couple of the five elements is the honest best available composition; the low score reflects that accurately instead of overstating it.",
+  },
+};
+
+export interface ProblemSummary {
+  category: ProblemCategory;
+  count: number;
+  label: string;
+  explanation: string;
+}
+
+/** Buckets every degraded/failed entry into why it landed there, most-common first. */
+export function summarizeProblems(details: StressDetail[]): ProblemSummary[] {
+  const counts = new Map<ProblemCategory, number>();
+  for (const d of details) {
+    const cat = categorizeStressDetail(d);
+    if (cat === null) continue;
+    counts.set(cat, (counts.get(cat) ?? 0) + 1);
+  }
+  return (Object.keys(CATEGORY_META) as ProblemCategory[])
+    .map((category) => ({
+      category,
+      count: counts.get(category) ?? 0,
+      ...CATEGORY_META[category],
+    }))
+    .filter((s) => s.count > 0)
+    .sort((a, b) => b.count - a.count);
 }
 
 export interface StressResult {
@@ -214,25 +291,36 @@ export function runStressTest(
     const context = resolveContext(surface);
     const { layout, trace } = resolveLayout(graph, context, surface);
     const visible = layout.elements.filter((e) => e.visible);
+    const visibleCount = visible.length;
+    const elementCount = layout.elements.length;
 
     const violation = findInvariantViolation(visible, surface);
     const overallScore = winningOverall(trace);
 
     if (violation !== undefined) {
-      return { surface, outcome: "failed", overallScore, reason: violation };
+      return {
+        surface,
+        outcome: "failed",
+        overallScore,
+        visibleCount,
+        elementCount,
+        reason: violation,
+      };
     }
     if (overallScore < DEGRADED_SCORE_THRESHOLD) {
       return {
         surface,
         outcome: "degraded",
         overallScore,
+        visibleCount,
+        elementCount,
         reason:
           `overall score ${overallScore} < ${DEGRADED_SCORE_THRESHOLD} ` +
           `(${visible.length}/${layout.elements.length} elements kept, ` +
           `winning strategy "${trace.winningStrategy}")`,
       };
     }
-    return { surface, outcome: "passed", overallScore };
+    return { surface, outcome: "passed", overallScore, visibleCount, elementCount };
   });
 
   return {
