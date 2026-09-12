@@ -552,8 +552,56 @@ just the midpoint between them, and that midpoint is unchanged whether the
 pair is clustered or spread, provided it stays centered. `visualBalanceScore`
 is therefore provably INDIFFERENT to spread-vs-cluster, not a reward for
 either — the corner-spread bug was never caused by this sub-score (it's
-orthogonal to it), so no formula change was made here; the fix in §4e stands
-alone.
+orthogonal to it), so no formula change was made here.
+
+**Update, post-live-testing:** §4e's `adjacencyFit` alone was not enough. It
+only judges ONE declared graph pair (`price` ↔ `cta`); in the real live UI,
+`overlay-safe-margins` kept winning on 4 of the 5 sample surfaces anyway,
+because its `constraintViolations`/`priorityPreservation` numbers were clean
+even while the LOGO and the PRODUCT IMAGE — neither part of any declared
+proximity edge — sat isolated in far corners with a large dead void in the
+middle. A real ad's elements are never independent components scattered
+across a surface; they always read as one connected composition. §4g adds the
+sub-score that actually fixes this for the whole ad, not just one pair.
+
+### compositionCohesion — the whole ad must read as one composition (§4g)
+
+`computeCompositionCohesion(candidate)` judges every VISIBLE element together,
+not just declared graph pairs: it finds the smallest bounding box enclosing
+all of them (the ad's own "footprint"), then scores
+`(sum of each element's own area) / (footprint area)` — how much of the ad's
+own footprint is actually filled with content versus empty gap. Four small
+elements pinned to the four corners of a huge surface have a huge footprint
+but tiny total content area → a very low score, precisely flagging "big dead
+void in the middle." A tightly stacked or efficiently packed composition has a
+footprint close to its own content area → a score near 100. Deliberately NOT
+"how much of the surface is used" — a legitimate full-bleed wide banner
+(headline hugging the left edge, logo hugging the right edge, both large
+relative to the gap) fills its own footprint efficiently and scores well
+despite spanning the surface; `scoring.test.ts` has a dedicated test proving
+this case is not penalized.
+
+Weighted at 0.16 — the heaviest of the "which arrangement is best" tier,
+above even `contextFit` — specifically so no combination of clean
+hard-constraint numbers can let a scattered composition win. Every other
+weight (including the freshly-added `adjacencyFit`) was trimmed again,
+proportionally, to fund it; see the `WEIGHTS` comment in `scoring.ts` for the
+exact before/after numbers.
+
+**Verified live, across all 5 real sample surfaces:** `overlay-safe-margins`
+no longer wins on ANY of them (previously it won on `mobilePortrait`,
+`printQRPanel`, and — via a "drop one element for a free neutral
+`adjacencyFit` score" quirk — effectively contested `retailKiosk` too).
+`mobilePortrait` and `retailKiosk` — the two surfaces that most visibly showed
+the scattered-corners bug in screenshots — now both resolve to `vertical-stack`
+with **5/5 elements visible**, rendering as a single top-to-bottom flow:
+headline → CTA → product image → price → logo, exactly how a real product ad
+reads. `scoring.test.ts` has a permanent regression guard asserting
+`overlay-safe-margins` is never the real resolver's winning strategy on any of
+the 5 sample surfaces. The Stress Lab's robustness figure improved as a
+side-effect (88.5% vs. the prior 84.0%) because the surfaces that now resolve
+to a cohesive strategy also keep more elements visible than the old
+scattered winner did.
 
 ---
 
@@ -736,31 +784,29 @@ cross-check, not the scorer asserting about itself. Tiers:
 | metric | value |
 |---|---|
 | total | 200 |
-| passed | 168 |
-| degraded | 32 |
+| passed | 177 |
+| degraded | 23 |
 | **failed** | **0** |
-| robustness (passed / total) | **84.0%** |
+| robustness (passed / total) | **88.5%** |
 
-Repeated unseeded runs land in an **82–86%** "robustness" band and, in every
+Repeated unseeded runs land in an **87–90%** "robustness" band and, in every
 run, **0 failed**. This band moved from **49–54%** (pre-`contextFit`) to
 **62–68%** (`contextFit` added, §4) to **86–89%** (the minTapTarget-sizing bug
-fixed) to **88–91%** (`emergency-fit`, §4d, added) to the current **82–86%**
-once `adjacencyFit` (§4e) was wired in and every other weight trimmed to make
-room for it. This LAST move is a **quality-bar dip, not a regression**: adding
-a 7th weighted term shifts some already-borderline `emergency-fit`-won scores
-(themselves already just above 70 purely by luck of the other six weights)
-below the threshold — every single one of the now-32 degraded entries is still
-categorized "sparse but valid" (see below), not a new "nothing fits" or
-"dropped-always" failure mode. The number that matters for correctness is
-`failed = 0`, confirmed unchanged after this phase: across 200 adversarial
+fixed) to **88–91%** (`emergency-fit`, §4d, added) to **82–86%** (`adjacencyFit`,
+§4e, added — a quality-bar dip from re-weighting, not a regression) to the
+current **87–90%** once `compositionCohesion` (§4g) was added. That last move
+is not just a quality-bar shuffle: it fixed a real correctness-adjacent bug —
+`overlay-safe-margins`'s scattered-corners arrangement no longer wins on ANY
+of the 5 real sample surfaces (previously it won on all but `broadcastLowerThird`),
+which incidentally also raised the robustness number because the surfaces that
+now resolve to `vertical-stack`/`horizontal-split` keep more elements visible
+than the old winner did. The number that matters for correctness is
+`failed = 0`, confirmed unchanged after every phase: across 200 adversarial
 surfaces including `3840×2160` and `120×2000`, the hard-invariant guarantee
 from §4 held every time. The robustness figure is the *quality* bar (score ≥
-70), not a correctness bar — see §10 for why that metric is soft, and note
-that this phase's own weight rebalancing is itself a demonstration of exactly
-that softness: the same layouts, scored by a differently-weighted (but no less
-principled) formula, cross the line differently.
+70), not a correctness bar — see §10 for why that metric is soft.
 
-### Conclusion: what the ~32 degraded entries actually are
+### Conclusion: what the ~23 degraded entries actually are
 
 Counting degraded entries without asking why is exactly the kind of number
 this project's whole philosophy argues against — so `categorizeStressDetail()`
