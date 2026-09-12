@@ -12,10 +12,16 @@ import { defineSurface, type SurfaceProfile } from "./surfaces";
  * priority: lower = more critical. The CTA outranks the product image because
  * a click is the goal; the logo is last because brand presence survives even
  * as a tiny mark.
+ *
+ * Real content (a Nykaa-style PDP ad for an actual Dior product), not
+ * placeholder text — headline/CTA/price/logo all carry a literal `text`, so
+ * they're sized from a real measureText() pass (candidates.ts) and rendered as
+ * real copy (SurfaceStage), not "role (id) WxH" debug boxes. The product photo
+ * is a real asset (public/products/…), not a colored rectangle.
  */
 export const productAd: AdSpec = defineAd({
-  id: "summer-sale-2026",
-  name: "Summer Sale — Wireless Headphones",
+  id: "dior-backstage-rosy-glow",
+  name: "DIOR Backstage Rosy Glow Stick — 012 Rosewood",
   elements: [
     {
       id: "headline",
@@ -25,6 +31,8 @@ export const productAd: AdSpec = defineAd({
       importance: "critical",
       interaction: "static",
       visibility: "always",
+      text: "Buildable Rosy Glow For Cheeks & Lips",
+      fontSize: 24,
       minSize: { width: 180, height: 40 },
       preferredSize: { width: 420, height: 96 },
     },
@@ -36,6 +44,8 @@ export const productAd: AdSpec = defineAd({
       importance: "critical",
       interaction: "clickable",
       visibility: "always",
+      text: "ADD TO BAG",
+      fontSize: 15,
       minSize: { width: 120, height: 44 },
       preferredSize: { width: 200, height: 56 },
     },
@@ -47,6 +57,7 @@ export const productAd: AdSpec = defineAd({
       importance: "should-survive",
       interaction: "static",
       visibility: "degradable",
+      src: "/products/dior-backstage-rosy-glow.png",
       minSize: { width: 96, height: 96 },
       preferredSize: { width: 480, height: 480 },
     },
@@ -58,17 +69,21 @@ export const productAd: AdSpec = defineAd({
       importance: "should-survive",
       interaction: "static",
       visibility: "degradable",
+      text: "₹2,900 · Shade 012 Rosewood",
+      fontSize: 15,
       minSize: { width: 64, height: 24 },
       preferredSize: { width: 140, height: 48 },
     },
     {
       id: "logo",
-      type: "image",
+      type: "text",
       role: "branding",
       priority: 5,
       importance: "nice-to-have",
       interaction: "static",
       visibility: "decorative-only",
+      text: "DIOR",
+      fontSize: 18,
       minSize: { width: 24, height: 24 },
       preferredSize: { width: 96, height: 32 },
       brandRules: { locked: true, minSize: { width: 24, height: 24 } },
