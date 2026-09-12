@@ -27,11 +27,12 @@ function dropped(id: string, role: string): ResolvedElement {
 }
 
 /**
- * A clean, valid layout: four non-overlapping in-bounds boxes inside the safe
- * area, keeping priorities 1-4 (headline, cta, price, logo — all
- * `visibility: "always"` since §7.7) and dropping only product-image
- * (priority 5, the sole `"degradable"` element — no priority inversion). The
- * cta meets retailKiosk's 60px minTapTarget.
+ * A clean, valid layout: three non-overlapping in-bounds boxes inside the
+ * safe area, keeping priorities 1-3 (headline, cta, product-image — all
+ * `visibility: "always"` since §7.8, product-image being "the highlight") and
+ * dropping the two `"degradable"`/`"decorative-only"` elements, price and
+ * logo (priorities 4-5 — no priority inversion). The cta meets retailKiosk's
+ * 60px minTapTarget.
  */
 function cleanCandidate(): Candidate {
   return {
@@ -40,9 +41,9 @@ function cleanCandidate(): Candidate {
     elements: [
       vis("headline", "primary", 48, 48, 420, 96),
       vis("cta", "action", 48, 160, 200, 64),
-      vis("price", "secondary", 48, 240, 150, 48),
-      vis("logo", "branding", 48, 300, 96, 32),
-      dropped("product-image", "hero"),
+      vis("product-image", "hero", 48, 240, 480, 480),
+      dropped("price", "secondary"),
+      dropped("logo", "branding"),
     ],
   };
 }
