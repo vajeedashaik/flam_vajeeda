@@ -1,50 +1,51 @@
 /* ==========================================================================
-   Adaptive Layout Engine — premium design system
-   Glassmorphism (panels / nav / cards) + claymorphism (buttons / tiles / rows)
-   Dark-first, light toggle via [data-theme] on <html>, system default.
+   Adaptive Layout Engine — Nykaa-branded design system
+   Glassmorphism (panels / nav / cards) + claymorphism (buttons / tiles / rows),
+   restyled entirely around Nykaa's identity: hot-pink accent (#fc2779), white
+   cards, clean near-black text. Light only — no dark theme.
    All animation is transform/opacity only and is disabled under
    prefers-reduced-motion.
    ========================================================================== */
 
-/* ---- Tokens: light (bare :root) ----------------------------------------- */
+/* ---- Tokens (bare :root — the only theme) -------------------------------- */
 :root {
   color-scheme: light;
 
-  --bg-0: #f4f1fb;
-  --bg-mesh-a: rgba(255, 178, 140, 0.55);
-  --bg-mesh-b: rgba(179, 157, 255, 0.55);
-  --bg-mesh-c: rgba(140, 230, 210, 0.5);
-  --bg-mesh-d: rgba(255, 200, 235, 0.45);
+  --bg-0: #fff7f9;
+  --bg-mesh-a: rgba(252, 39, 121, 0.14);
+  --bg-mesh-b: rgba(255, 105, 160, 0.12);
+  --bg-mesh-c: rgba(252, 39, 121, 0.07);
+  --bg-mesh-d: rgba(255, 182, 205, 0.16);
 
-  --text-strong: #241b35;
-  --text: #40374f;
-  --text-dim: #6c6379;
-  --text-faint: #8a8397;
+  --text-strong: #1a1a1a;
+  --text: #3a3a3a;
+  --text-dim: #6b6b6b;
+  --text-faint: #8f8f8f;
 
-  --glass-bg: rgba(255, 255, 255, 0.55);
-  --glass-bg-strong: rgba(255, 255, 255, 0.72);
-  --glass-border: rgba(255, 255, 255, 0.75);
+  --glass-bg: rgba(255, 255, 255, 0.65);
+  --glass-bg-strong: rgba(255, 255, 255, 0.85);
+  --glass-border: rgba(252, 39, 121, 0.12);
   --glass-hairline: rgba(255, 255, 255, 0.9);
-  --glass-shadow: 0 10px 34px -12px rgba(60, 40, 100, 0.35);
+  --glass-shadow: 0 10px 34px -14px rgba(252, 39, 121, 0.28);
 
   --clay-bg: #ffffff;
-  --clay-bg-sunk: #ece7f6;
+  --clay-bg-sunk: #fdeaf1;
   --clay-shadow:
-    8px 8px 20px rgba(122, 100, 165, 0.28),
+    8px 8px 20px rgba(252, 39, 121, 0.16),
     -8px -8px 18px rgba(255, 255, 255, 0.9),
     inset 1px 1px 1px rgba(255, 255, 255, 0.7),
-    inset -2px -2px 6px rgba(122, 100, 165, 0.12);
+    inset -2px -2px 6px rgba(252, 39, 121, 0.08);
   --clay-shadow-press:
-    inset 5px 5px 12px rgba(122, 100, 165, 0.3),
+    inset 5px 5px 12px rgba(252, 39, 121, 0.18),
     inset -4px -4px 10px rgba(255, 255, 255, 0.85);
   --clay-shadow-hover:
-    11px 13px 26px rgba(122, 100, 165, 0.32),
+    11px 13px 26px rgba(252, 39, 121, 0.22),
     -8px -8px 18px rgba(255, 255, 255, 0.95);
 
-  --accent-a: #7c3aed;
-  --accent-b: #06b6d4;
+  --accent-a: #fc2779;
+  --accent-b: #e0125a;
   --accent-grad: linear-gradient(120deg, var(--accent-a), var(--accent-b));
-  --accent-ring: rgba(124, 58, 237, 0.45);
+  --accent-ring: rgba(252, 39, 121, 0.45);
   --on-accent: #ffffff;
 
   --ok: #0f9d6f;
@@ -53,12 +54,6 @@
   --warn-bg: rgba(214, 138, 16, 0.16);
   --bad: #d63b3b;
   --bad-bg: rgba(214, 59, 59, 0.14);
-
-  --role-primary: #2563eb;
-  --role-action: #d65a00;
-  --role-hero: #9333ea;
-  --role-secondary: #0d9488;
-  --role-branding: #64748b;
 
   --r-sm: 10px;
   --r-md: 16px;
@@ -71,116 +66,6 @@
   --gap: clamp(14px, 2vw, 24px);
 
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-/* ---- Tokens: dark ----------------------------------------------------------
-   Defined for both the explicit toggle and the system default. */
-:root[data-theme="dark"],
-:root:not([data-theme="light"]) {
-  /* fallback for older engines; real switch is the media query below */
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    color-scheme: dark;
-
-    --bg-0: #0b0813;
-    --bg-mesh-a: rgba(124, 58, 237, 0.5);
-    --bg-mesh-b: rgba(6, 182, 212, 0.42);
-    --bg-mesh-c: rgba(236, 72, 153, 0.34);
-    --bg-mesh-d: rgba(59, 130, 246, 0.4);
-
-    --text-strong: #f4f1ff;
-    --text: #cfc7e6;
-    --text-dim: #9d94b8;
-    --text-faint: #7b7296;
-
-    --glass-bg: rgba(30, 24, 48, 0.55);
-    --glass-bg-strong: rgba(34, 27, 54, 0.74);
-    --glass-border: rgba(255, 255, 255, 0.12);
-    --glass-hairline: rgba(255, 255, 255, 0.16);
-    --glass-shadow: 0 16px 44px -14px rgba(0, 0, 0, 0.7);
-
-    --clay-bg: #1b1530;
-    --clay-bg-sunk: #140f24;
-    --clay-shadow:
-      8px 8px 22px rgba(0, 0, 0, 0.55),
-      -6px -6px 16px rgba(120, 90, 200, 0.14),
-      inset 1px 1px 1px rgba(255, 255, 255, 0.06),
-      inset -2px -2px 6px rgba(0, 0, 0, 0.4);
-    --clay-shadow-press:
-      inset 5px 5px 14px rgba(0, 0, 0, 0.6),
-      inset -4px -4px 10px rgba(120, 90, 200, 0.12);
-    --clay-shadow-hover:
-      11px 13px 30px rgba(0, 0, 0, 0.6),
-      -7px -7px 18px rgba(120, 90, 200, 0.18);
-
-    --accent-ring: rgba(139, 92, 246, 0.6);
-
-    --ok: #2ee6a6;
-    --ok-bg: rgba(46, 230, 166, 0.16);
-    --warn: #f0b429;
-    --warn-bg: rgba(240, 180, 41, 0.18);
-    --bad: #ff6b6b;
-    --bad-bg: rgba(255, 107, 107, 0.16);
-
-    --role-primary: #6ea8ff;
-    --role-action: #ff9e5e;
-    --role-hero: #c77dff;
-    --role-secondary: #5eead4;
-    --role-branding: #9fb0c3;
-  }
-}
-
-/* explicit dark toggle wins in both directions */
-:root[data-theme="dark"] {
-  color-scheme: dark;
-
-  --bg-0: #0b0813;
-  --bg-mesh-a: rgba(124, 58, 237, 0.5);
-  --bg-mesh-b: rgba(6, 182, 212, 0.42);
-  --bg-mesh-c: rgba(236, 72, 153, 0.34);
-  --bg-mesh-d: rgba(59, 130, 246, 0.4);
-
-  --text-strong: #f4f1ff;
-  --text: #cfc7e6;
-  --text-dim: #9d94b8;
-  --text-faint: #7b7296;
-
-  --glass-bg: rgba(30, 24, 48, 0.55);
-  --glass-bg-strong: rgba(34, 27, 54, 0.74);
-  --glass-border: rgba(255, 255, 255, 0.12);
-  --glass-hairline: rgba(255, 255, 255, 0.16);
-  --glass-shadow: 0 16px 44px -14px rgba(0, 0, 0, 0.7);
-
-  --clay-bg: #1b1530;
-  --clay-bg-sunk: #140f24;
-  --clay-shadow:
-    8px 8px 22px rgba(0, 0, 0, 0.55),
-    -6px -6px 16px rgba(120, 90, 200, 0.14),
-    inset 1px 1px 1px rgba(255, 255, 255, 0.06),
-    inset -2px -2px 6px rgba(0, 0, 0, 0.4);
-  --clay-shadow-press:
-    inset 5px 5px 14px rgba(0, 0, 0, 0.6),
-    inset -4px -4px 10px rgba(120, 90, 200, 0.12);
-  --clay-shadow-hover:
-    11px 13px 30px rgba(0, 0, 0, 0.6),
-    -7px -7px 18px rgba(120, 90, 200, 0.18);
-
-  --accent-ring: rgba(139, 92, 246, 0.6);
-
-  --ok: #2ee6a6;
-  --ok-bg: rgba(46, 230, 166, 0.16);
-  --warn: #f0b429;
-  --warn-bg: rgba(240, 180, 41, 0.18);
-  --bad: #ff6b6b;
-  --bad-bg: rgba(255, 107, 107, 0.16);
-
-  --role-primary: #6ea8ff;
-  --role-action: #ff9e5e;
-  --role-hero: #c77dff;
-  --role-secondary: #5eead4;
-  --role-branding: #9fb0c3;
 }
 
 /* ---- Base --------------------------------------------------------------- */
@@ -648,7 +533,7 @@ body::before {
 .ale-stage-frame[data-frame="phone"],
 .ale-stage-frame[data-frame="wide"],
 .ale-stage-frame[data-frame="square"] {
-  background: linear-gradient(160deg, #2a2340, #120d20);
+  background: linear-gradient(160deg, #2b2b33, #0a0a0d);
   box-shadow:
     10px 14px 34px rgba(0, 0, 0, 0.4),
     inset 0 1px 2px rgba(255, 255, 255, 0.12),
