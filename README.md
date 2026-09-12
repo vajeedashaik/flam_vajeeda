@@ -31,7 +31,7 @@ Requires Node 18+.
 ```bash
 npm install       # install dependencies
 npm run dev       # start the Vite dev server (http://localhost:5173)
-npm run test      # run the full Vitest suite (112 tests)
+npm run test      # run the full Vitest suite (123 tests)
 npm run build     # type-check (tsc --noEmit) + production build to dist/
 npm run preview   # serve the production build locally (http://localhost:4173)
 ```
@@ -142,7 +142,8 @@ feature numbers (`§4.x`).
 | Layout Counterfactuals panel | Every candidate + score; click a loser for a generated sentence naming the sub-score gap (`explainLoss`) | Code quality (10%); §4.7b |
 | Layout Health Check panel | Pass/warn/fail checklist derived from the same 6 sub-scores | Code quality (10%); Example application (10%); §4.7c |
 | Side-by-side multi-surface view | All 5 surfaces resolved and rendered at once in device-style frames | Layout correctness across surfaces (25%); §4.16 |
-| Stress Lab | 200 randomized surfaces incl. extremes; tiered pass/degraded/failed; **0 failed every run**; ~90% robustness, remaining degraded band is 100% "sparse but valid" (no nothing-fits / always-element-dropped cases left) | Layout correctness across surfaces (25%); §4.10 |
+| Stress Lab | 200 randomized surfaces incl. extremes; tiered pass/degraded/failed; **0 failed every run**; ~84% robustness, remaining degraded band is 100% "sparse but valid" (no nothing-fits / always-element-dropped cases left) | Layout correctness across surfaces (25%); §4.10 |
+| Adjacency-fit sub-score | Wires the Experience Graph's "proximity" edges (e.g. price ↔ its call-to-action) into scoring — a 7th sub-score rewards a candidate for keeping graph-linked pairs spatially close instead of leaving the graph's relational data unused | Constraint resolution algorithm (35%); §4e |
 | Self-healing demo | Recovers from long text + broken images + tiny surface + translated copy simultaneously | Layout correctness (25%); §4.13; official bonus "text-measurement-aware layout" |
 | Real text measurement (`text-measure.ts`) | Canvas `measureText()` for the true rendered width of long / translated strings; node fallback preserves ordering | Constraint resolution algorithm (35%); official bonus "text-measurement-aware layout"; §4.13 / §4.17 |
 | Naive-vs-smart comparison | The real output beside a deliberately dumb uniform-scaling resolver | Example application (10%); §4.19 (proves it is not "uniform scaling passed off as adaptation") |
@@ -174,7 +175,7 @@ Real, specific to what was built (more technical depth in
   always-visible elements' minSize to a 24×16 floor so something real still
   renders instead of nothing. On some mid-size surfaces the best of four is
   only adequate — that is the remaining "degraded" band in the Stress Lab.
-- **The Stress Lab "robustness" number (~90%) is a quality bar, not a
+- **The Stress Lab "robustness" number (~84%) is a quality bar, not a
   correctness bar.** "passed" means score ≥ 70. Hard-invariant safety (no
   overlap / clip / dropped-always, ever) held on 100% of surfaces in every run;
   "failed" is always 0. The headline percentage understates correctness: since
@@ -186,7 +187,13 @@ Real, specific to what was built (more technical depth in
   see ARCHITECTURE.md §4, "Context-aware sizing" and §4d, "Emergency-fit", for
   the two fixes (a minTapTarget-sizing bug, then the emergency-fit strategy)
   that moved this number from ~65% → ~87% → ~90%, and shifted every remaining
-  failure mode from "ad disappears" to "ad is honestly sparse."
+  failure mode from "ad disappears" to "ad is honestly sparse." It then moved
+  to ~84% after §4e added a 7th weighted sub-score (`adjacencyFit`) and
+  trimmed the other six to make room for it — a handful of borderline
+  `emergency-fit` layouts that used to just clear 70 now just miss it under
+  the new weights. This is the quality bar moving, not a new failure mode:
+  every one of those entries is still "sparse but valid," and `failed` is
+  still 0 in every run.
 - **Text measurement uses the Canvas `measureText()` API**, which differs
   slightly from the browser's final text layout (kerning, font fallback,
   wrapping). In the Node test environment there is no canvas, so a linear
@@ -248,18 +255,18 @@ through), or **Skipped**.
 
 | # | Feature | Status | Notes |
 |---|---|---|---|
-| 4.1 | Semantic layout graph (typed relational edges) | **Implemented** | proximity + exclusion edges derived from roles; `alignment` typed but not derived; edges not yet read by placement |
+| 4.1 | Semantic layout graph (typed relational edges) | **Implemented** | proximity + exclusion edges derived from roles; `alignment` typed but not derived; proximity edges now read by scoring's `adjacencyFit` sub-score (§4e) — not yet by placement itself |
 | 4.2 | Importance / survival tiers | **Implemented** | `importance` + `visibility` unions; `visibility:"always"` enforced as a hard-fail in scoring |
-| 4.3 | Candidate generation + deterministic fitness scoring | **Implemented** | 5 strategies (4 context-suited + `emergency-fit` last-resort), 6 weighted sub-scores, hard-fail rule, determinism test |
+| 4.3 | Candidate generation + deterministic fitness scoring | **Implemented** | 5 strategies (4 context-suited + `emergency-fit` last-resort), 7 weighted sub-scores (incl. `adjacencyFit`, §4e), hard-fail rule, determinism test |
 | 4.3-context | Context-aware adaptation | **Implemented** | far-viewing inflates text/button preferred size, touch inflates the clickable CTA (candidates.ts); a `contextFit` sub-score rewards the aspect-matched strategy and fewer visible elements under short attention / far viewing (scoring.ts) — composition strategy itself changes, not just sizes (verified: broadcastLowerThird's winner flips from `grid` to `horizontal-split`) |
 | 4.4 | Lightweight declarative constraint rules | **Implemented** | safeArea / minSize / minTapTarget / brandRules read by the scorer, declared on spec+surface |
 | 4.5 | Graceful degradation engine | **Implemented** | strict priority-monotone shrink→drop cascade; documented in ARCHITECTURE §5 |
 | 4.6 | Brand-safe adaptation | **Partial** | `brandRules.locked` + brand `minSize` are honoured as a `constraintViolations` penalty; not every advertiser rule from the plan (e.g. `product.mustStayDominant`, `headline.canWrapNotTruncate`) is modelled |
 | 4.7 | Layout Debugger | **Implemented** | live per-element decision-trace panel |
 | 4.7b | Layout Counterfactuals | **Implemented** | click a losing candidate → `explainLoss()` names the largest sub-score gap and the point delta |
-| 4.7c | Layout Health Check | **Implemented** | pass/warn/fail checklist on the 6 sub-scores |
+| 4.7c | Layout Health Check | **Implemented** | pass/warn/fail checklist on the 7 sub-scores, incl. "Element grouping" (`adjacencyFit`) |
 | 4.9 | Performance-aware composition | **Implemented** | `renderCost` sub-score (weight 0.06) as a tie-breaker inside the same fitness function |
-| 4.10 | Automated stress testing ("Stress Lab") | **Implemented** | 200 randomized surfaces, tiered pass/degraded/failed, click-through inspection; 0 failed every run; robustness moved ~50% → ~65% (`contextFit`) → ~87% (fixing a minTapTarget-sizing bug the Stress Lab itself surfaced) → ~90% (adding `emergency-fit`, which also eliminated the "nothing fits"/"always-element-dropped" degraded categories entirely) |
+| 4.10 | Automated stress testing ("Stress Lab") | **Implemented** | 200 randomized surfaces, tiered pass/degraded/failed, click-through inspection; 0 failed every run; robustness moved ~50% → ~65% (`contextFit`) → ~87% (fixing a minTapTarget-sizing bug the Stress Lab itself surfaced) → ~90% (adding `emergency-fit`, which also eliminated the "nothing fits"/"always-element-dropped" degraded categories entirely) → ~84% (adding `adjacencyFit`, §4e — a quality-bar dip from re-weighting, not a new failure mode; still 0 failed, still 100% "sparse but valid" in the degraded band) |
 | 4.13 | Self-healing / fault-tolerant layout (combined stressors) | **Implemented** | long headline + invalid hero src + missing logo src + tiny surface + longer German CTA, all at once; recovers with CTA kept (now via `grid`, 4/4 visible — `contextFit`'s square-aspect bonus improved on the pre-fix `vertical-stack`, 3/4 visible) |
 | 4.14 | Interactive vs. passive layout strategy | **Implemented** | touch surfaces get a genuinely bigger CTA (candidates.ts sizing) and `contextFit` penalizes `overlay-safe-margins` (corner-spread targets) under touch; far-viewing/short-attention surfaces reward strategies that keep fewer, larger elements visible |
 | 4.16 | Side-by-side multi-surface view | **Implemented** | all 5 surfaces at once in phone/wide/square frames, each a real resolved layout |
@@ -280,6 +287,14 @@ Official bonus points called out in the brief:
 - **"resolve an unseen surface live in the interview"** — **Implemented**
   (Unknown-surface view; verified in the regression sweep with a 2600×360
   surface).
+- **Graceful failure on a mathematically unsatisfiable surface** —
+  **Implemented** (`resolver.test.ts`, §7.3): a surface smaller on both
+  axes than even `emergency-fit`'s last-resort floor (24×16) is run through
+  the full `buildGraph → resolveContext → resolveLayout` pipeline; it never
+  throws, every one of the five candidates hard-fails to `overall: 0`, and
+  the returned layout has zero visible elements rather than an
+  overlapping/out-of-bounds one — closing the one gap flagged against sibling
+  implementations of this brief.
 
 ---
 
@@ -303,7 +318,7 @@ src/
     self-healing-scenario.ts adversarial spec + tiny surface (5.2)
     render-dom.ts            deliberate stub (framework-agnostic renderer seam)
     spec.invalid-example.ts.txt   compile-error demonstration (excluded from build)
-    __tests__/               11 Vitest suites, 112 tests
+    __tests__/               11 Vitest suites, 123 tests
   components/
     SurfaceStage.tsx         the one ResolvedLayout → pixels renderer
     DeviceFrame.tsx          phone/TV/clean device chassis wrapper (presentation only)
