@@ -63,13 +63,13 @@ describe("defineAd", () => {
     );
   });
 
-  it("throws with a clear message for a missing/NaN priority", () => {
+  it("throws with a clear message for a NaN priority — not the misleading 'null' JSON.stringify(NaN) produces", () => {
     const config = validConfig();
     // Simulate a JS caller passing a bad value past the type system.
     (config.elements[2] as { priority: unknown }).priority = Number.NaN;
 
     expect(() => defineAd(config)).toThrow(
-      /element "logo": invalid priority null\. Priority must be a positive number/,
+      /element "logo": invalid priority NaN\. Priority must be a positive number/,
     );
   });
 
