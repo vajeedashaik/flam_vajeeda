@@ -34,19 +34,20 @@ import { DegradationSlider } from "./components/DegradationSlider";
 import { UnknownSurfaceInput } from "./components/UnknownSurfaceInput";
 import { SelfHealingDemo } from "./components/SelfHealingDemo";
 
-// §7.7: since price/logo were promoted to visibility:"always" (only
-// product-image is degradable now), 200×200 no longer drops anything — every
-// one of the "4 infos" survives via emergency-fit, and so does the photo.
-// 150×150 is the smallest size that still fits all four always-elements at
-// their emergency floor while genuinely no longer fitting the photo's own
-// declared minSize (96×96) alongside them, so the demo still shows a real
-// drop — just the intended one now: the photo goes, the four info pieces stay.
+// §7.8: the product photo is "the highlight" — promoted to
+// `visibility: "always"` alongside headline/cta, while price/logo are the
+// two elements allowed to degrade first under real space pressure (reverting
+// §7.7's promotion of price/logo, which had it backwards). 70×70 is small
+// enough to force a real drop of BOTH degradable elements (price and logo)
+// while still fitting headline, cta, AND the product photo at emergency-fit's
+// floor — the clearest demonstration of "the highlight survives even when
+// other content doesn't."
 const shrunkKiosk: SurfaceProfile = defineSurface({
   ...surfaceProfiles.retailKiosk,
   id: "retailKioskShrunk",
-  name: "Retail kiosk — shrunk 150×150 (degradation demo)",
-  width: 150,
-  height: 150,
+  name: "Retail kiosk — shrunk 70×70 (degradation demo)",
+  width: 70,
+  height: 70,
   safeArea: { top: 0, right: 0, bottom: 0, left: 0 },
 });
 
