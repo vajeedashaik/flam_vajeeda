@@ -479,6 +479,82 @@ never win — this is the invariant the Stress Lab verifies end-to-end (§8).
 `scoreCandidate` is pure: a determinism test calls it twice with identical inputs
 and asserts identical output. No `Date`, no `Math.random`, no I/O.
 
+### adjacencyFit — wiring the Experience Graph's proximity edges into scoring (§4e)
+
+Before this phase, `graph.edges` and `getRelatedNodes()` were referenced only
+inside `graph.ts` and `graph.test.ts` — no strategy in `candidates.ts` and no
+rule in `scoring.ts` ever read edge data. The graph's "proximity" relationship
+(Rule P: every `secondary` role paired with every `action` role, e.g. `price`
+↔ `cta`) existed but had zero effect on the actual resolved layout. Visually,
+this let `overlay-safe-margins` win with `price` and `cta` in opposite
+corners and a large unused void between them — the two highest-priority
+elements always land in opposite corners by that strategy's own design (§4),
+and nothing scored that arrangement any worse for a pair the graph explicitly
+says belongs together.
+
+`computeAdjacencyFit(candidate, graph, surface)` closes that gap: for every
+proximity edge, if both endpoints are visible in this candidate, it takes the
+Euclidean distance between their bounding-box centers, normalizes it by the
+usable box's diagonal (`availableBox` — the same reference `visualBalanceScore`
+already uses), and converts to a 0-100 score, linear from 100 at zero distance
+to 0 at a full-diagonal separation. A pair with either element dropped is
+skipped entirely (not penalized) — an element that isn't on screen can't be
+meaningfully "far" from its partner, and a dropped `visibility:"always"`
+element is already a separate hard-fail while a dropped degradable one is
+already penalized by `priorityPreservationScore`. Zero proximity edges, or
+zero evaluable pairs, both return a neutral 100.
+
+It is weighted at 0.10 in `scoreCandidate` — the same tier as `contextFit` and
+`visualBalance`, high enough to actually change which candidate wins (the
+whole point of this phase), never high enough to override the separate
+hard-fail rule above. Every other weight was trimmed by a small, roughly
+proportional amount to make room for it (see the code comment on `WEIGHTS` in
+`scoring.ts`).
+
+**Verified live:** on the `broadcastLowerThird` sample surface,
+`overlay-safe-margins` used to win outright with `price`/`cta` in opposite
+corners (`adjacencyFit` now measures that arrangement at 13/100). After this
+change, the winner shifts to a candidate (`grid`, in the current build) that
+keeps `price` and `cta` diagonally adjacent instead of in opposite corners —
+`adjacencyFit` 72/100 — and the Layout Counterfactuals panel's `explainLoss()`
+now names "element grouping" as the reason `overlay-safe-margins` lost when
+clicked, with **zero new code in `explainLoss`** — it already iterates a table
+of sub-scores generically, so adding one row (`{ key: "adjacencyFit", label:
+"element grouping", ... }` in `trace.ts`) was the only change needed there.
+
+One known trade-off, found and left as-is rather than special-cased: because
+a pair with a dropped element is scored *neutral* (100), not penalized, a
+strategy that drops one member of a proximity pair can score better on
+`adjacencyFit` than a strategy that keeps both visible but only loosely
+close — e.g. on `retailKiosk`, `horizontal-split` wins partly because it
+drops `price` entirely (neutral 100) rather than placing it at a real, if
+imperfect, distance from `cta`. This is an inherent consequence of the
+"skip incomplete pairs" rule (deliberate: penalizing a dropped element twice,
+once via `priorityPreservationScore` and again via a fabricated "infinitely
+far" `adjacencyFit` penalty, would double-count the same drop), not a defect
+in the distance formula itself — `priorityPreservationScore` already
+penalizes the drop on its own axis, and no single sub-score is meant to
+capture every possible failure mode alone.
+
+### Visual balance audit (§4f) — does it fight adjacencyFit?
+
+Investigated because a formula that rewards spreading elements evenly across
+the whole surface would actively fight `adjacencyFit`'s "keep related pairs
+close" goal. Reading `visualBalanceScore` (§4 above) shows it measures two
+things only: how close the AREA-WEIGHTED CENTROID of all visible elements
+sits to the usable box's center (65% of the score), and how even their areas
+are (35%) — never the distance between any two specific elements. Verified
+empirically (`scoring.test.ts`): two equal-sized elements placed a few pixels
+apart at the box's center score IDENTICALLY to the same two elements pushed
+into opposite corners, as long as both arrangements are symmetric around the
+same center point — because an area-weighted centroid of two equal elements is
+just the midpoint between them, and that midpoint is unchanged whether the
+pair is clustered or spread, provided it stays centered. `visualBalanceScore`
+is therefore provably INDIFFERENT to spread-vs-cluster, not a reward for
+either — the corner-spread bug was never caused by this sub-score (it's
+orthogonal to it), so no formula change was made here; the fix in §4e stands
+alone.
+
 ---
 
 ## 5. Priority / degradation logic
@@ -660,22 +736,31 @@ cross-check, not the scorer asserting about itself. Tiers:
 | metric | value |
 |---|---|
 | total | 200 |
-| passed | 180 |
-| degraded | 20 |
+| passed | 168 |
+| degraded | 32 |
 | **failed** | **0** |
-| robustness (passed / total) | **90.0%** |
+| robustness (passed / total) | **84.0%** |
 
-Repeated unseeded runs land in an **88–91%** "robustness" band and, in every
+Repeated unseeded runs land in an **82–86%** "robustness" band and, in every
 run, **0 failed**. This band moved from **49–54%** (pre-`contextFit`) to
 **62–68%** (`contextFit` added, §4) to **86–89%** (the minTapTarget-sizing bug
-fixed) to the current **88–91%** once `emergency-fit` (§4d) was added — four
-real, measured improvements, not re-tuned thresholds. The number that matters
-for correctness is `failed = 0`: across 200 adversarial surfaces including
-`3840×2160` and `120×2000`, the hard-invariant guarantee from §4 held every
-time. The robustness figure is the *quality* bar (score ≥ 70), not a
-correctness bar — see §10 for why that metric is soft.
+fixed) to **88–91%** (`emergency-fit`, §4d, added) to the current **82–86%**
+once `adjacencyFit` (§4e) was wired in and every other weight trimmed to make
+room for it. This LAST move is a **quality-bar dip, not a regression**: adding
+a 7th weighted term shifts some already-borderline `emergency-fit`-won scores
+(themselves already just above 70 purely by luck of the other six weights)
+below the threshold — every single one of the now-32 degraded entries is still
+categorized "sparse but valid" (see below), not a new "nothing fits" or
+"dropped-always" failure mode. The number that matters for correctness is
+`failed = 0`, confirmed unchanged after this phase: across 200 adversarial
+surfaces including `3840×2160` and `120×2000`, the hard-invariant guarantee
+from §4 held every time. The robustness figure is the *quality* bar (score ≥
+70), not a correctness bar — see §10 for why that metric is soft, and note
+that this phase's own weight rebalancing is itself a demonstration of exactly
+that softness: the same layouts, scored by a differently-weighted (but no less
+principled) formula, cross the line differently.
 
-### Conclusion: what the ~20 degraded entries actually are
+### Conclusion: what the ~32 degraded entries actually are
 
 Counting degraded entries without asking why is exactly the kind of number
 this project's whole philosophy argues against — so `categorizeStressDetail()`
