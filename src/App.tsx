@@ -26,7 +26,7 @@ import { resolveLayout } from "./core/resolver";
 import { LayoutDebugger } from "./components/LayoutDebugger";
 import { LayoutCounterfactuals } from "./components/LayoutCounterfactuals";
 import { LayoutHealthCheck } from "./components/LayoutHealthCheck";
-import { SurfaceStage } from "./components/SurfaceStage";
+import { DeviceFrame, type DeviceType } from "./components/DeviceFrame";
 import { StressLab } from "./components/StressLab";
 import { MultiSurfaceView } from "./components/MultiSurfaceView";
 import { NaiveVsSmart } from "./components/NaiveVsSmart";
@@ -77,12 +77,21 @@ function readTheme(): ThemeChoice {
   return "system";
 }
 
+const DEVICE_OPTIONS: { key: DeviceType; label: string }[] = [
+  { key: "auto", label: "Auto" },
+  { key: "clean", label: "Clean" },
+  { key: "phone", label: "Phone" },
+  { key: "tv", label: "TV" },
+];
+
 export default function App(): JSX.Element {
   const [mode, setMode] = useState<Mode>("single");
   const [selectedKey, setSelectedKey] = useState<string>(BASE_OPTIONS[0]!.key);
   /** Surfaces loaded from the Stress Lab / other views, appended to the picker. */
   const [extraSurfaces, setExtraSurfaces] = useState<SurfaceProfile[]>([]);
   const [theme, setTheme] = useState<ThemeChoice>(readTheme);
+  const [deviceType, setDeviceType] = useState<DeviceType>("auto");
+  const [showDebug, setShowDebug] = useState(false);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -183,22 +192,52 @@ export default function App(): JSX.Element {
 
       {mode === "single" && (
         <div className="ale-view" data-testid="single-view">
-          <label className="ale-field" style={{ marginBottom: 10 }}>
-            Surface
-            <select
-              className="ale-select"
-              data-testid="surface-picker"
-              name="surface-picker"
-              value={selectedKey}
-              onChange={(e) => setSelectedKey(e.target.value)}
+          <div className="ale-toolbar" style={{ marginBottom: 10 }}>
+            <label className="ale-field">
+              Surface
+              <select
+                className="ale-select"
+                data-testid="surface-picker"
+                name="surface-picker"
+                value={selectedKey}
+                onChange={(e) => setSelectedKey(e.target.value)}
+              >
+                {options.map((o) => (
+                  <option key={o.key} value={o.key}>
+                    {o.surface.name ?? o.key} ({o.surface.width}×{o.surface.height})
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="ale-field">
+              Device frame
+              <select
+                className="ale-select"
+                data-testid="device-picker"
+                name="device-picker"
+                value={deviceType}
+                onChange={(e) => setDeviceType(e.target.value as DeviceType)}
+              >
+                {DEVICE_OPTIONS.map((d) => (
+                  <option key={d.key} value={d.key}>
+                    {d.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <button
+              type="button"
+              className={`ale-btn${showDebug ? "" : " ale-btn--ghost"}`}
+              data-testid="debug-toggle"
+              aria-pressed={showDebug}
+              title="Overlay safe-area + per-element zone/shrink bounding boxes"
+              onClick={() => setShowDebug((prev) => !prev)}
             >
-              {options.map((o) => (
-                <option key={o.key} value={o.key}>
-                  {o.surface.name ?? o.key} ({o.surface.width}×{o.surface.height})
-                </option>
-              ))}
-            </select>
-          </label>
+              {showDebug ? "Debug: on" : "Debug: off"}
+            </button>
+          </div>
 
           <p className="ale-meta">
             winning strategy{" "}
@@ -215,10 +254,13 @@ export default function App(): JSX.Element {
           </p>
 
           <div style={{ marginBottom: 16 }}>
-            <SurfaceStage
+            <DeviceFrame
               surface={surface}
               elements={layout.elements}
               specById={specById}
+              trace={trace}
+              showDebug={showDebug}
+              deviceType={deviceType}
               maxWidth={VIEWPORT_MAX.width}
               maxHeight={VIEWPORT_MAX.height}
             />
@@ -228,6 +270,7 @@ export default function App(): JSX.Element {
             baseSurface={surface}
             graph={graph}
             specById={specById}
+            showDebug={showDebug}
           />
 
           <div className="ale-panels-grid" data-testid="phase4-panels">
