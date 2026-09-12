@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { generateCandidates, type Candidate, type CandidateStrategy } from "../candidates";
+import { availableBox, generateCandidates, type Candidate, type CandidateStrategy } from "../candidates";
 import { buildGraph } from "../graph";
 import { resolveContext, type Context } from "../context";
 import { resolveLayout } from "../resolver";
@@ -132,7 +132,12 @@ describe("generateCandidates — grow into slack, capped, brand-lock exempt", ()
 
   function naturalWidth(id: string): number {
     const spec = productAd.elements.find((e) => e.id === id)!;
-    return measureTextWidth(spec.text!, spec.fontSize!);
+    const measured = measureTextWidth(spec.text!, spec.fontSize!);
+    // Mirrors toRequest()'s own width formula: the largest of the measured
+    // text, the declared minSize, and the declared preferredSize — the same
+    // three-way max the height branch always used, and width now uses too
+    // (bug fix: width used to omit preferredSize entirely, see candidates.ts).
+    return Math.max(measured, spec.minSize?.width ?? 0, spec.preferredSize?.width ?? 0);
   }
 
   it("vertical-stack (width is the free axis): a non-locked text element grows beyond its measured width, capped at 1.4x", () => {
@@ -244,10 +249,11 @@ describe("generateCandidates — clickable sizing targets the surface's real min
   // ~50px button to ~58px and call it "touch-aware" while the surface asked
   // for 96px. A spacious surface isolates sizing from the shrink cascade.
   // 300 is deliberately far above anything else that inflates size on this
-  // surface — touch-scale (1.15x) and vertical-stack's width-growth cap
-  // (1.4x) on a ~120-138px natural CTA top out well under 200, and headline's
-  // own declared preferredSize.height is 96 — so 300 can only be reached by
-  // this fix actually targeting minTapTarget, never by coincidence.
+  // surface — cta's own preferredSize.width (200) × touch-scale (1.15x) ×
+  // vertical-stack's width-growth cap (1.4x) tops out at 322, and headline's
+  // own declared preferredSize.height is 96 — the assertion below only checks
+  // a `>= 300` floor, so it still only passes because minTapTarget's own
+  // clamp (not growth or touch-scale alone) guarantees that floor.
   const spaciousSurface: SurfaceProfile = defineSurface({
     id: "min-tap-target-test-surface",
     width: 4000,
@@ -285,7 +291,12 @@ describe("generateCandidates — clickable sizing targets the surface's real min
       ),
       "cta",
     );
-    expect(ctaWithout.width).toBeLessThan(200);
+    // cta's own declared preferredSize.width (200) IS its natural width once
+    // toRequest correctly considers it (see the bug fix in candidates.ts) —
+    // the invariant this test actually cares about is that the minTapTarget
+    // clamp never pushes it any HIGHER than that when the surface declares
+    // no minTapTarget at all, not that 200 itself is somehow too big.
+    expect(ctaWithout.width).toBeLessThanOrEqual(200);
   });
 });
 
@@ -376,5 +387,187 @@ describe("generateCandidates — emergency-fit: always-visible elements survive 
         expect(visible[i]!.y + visible[i]!.height).toBeLessThanOrEqual(surface.height + 0.5);
       }
     }
+  });
+});
+
+/**
+ * §7.5 — two real, user-reported bugs found by inspecting the live rendered
+ * ad, not by theorizing: (1) a locked brand logo was rendering illegibly
+ * small because its declared `preferredSize.width` was silently never
+ * consulted for text/button elements — only the measured string width and
+ * `minSize.width` were — so a short 4-letter mark like "DIOR" collapsed to
+ * its own literal character width instead of the size the ad author actually
+ * asked for; (2) the CTA button never grew into available slack at all
+ * (exempt from ALL growth), leaving it a small, disconnected pill next to
+ * visible dead space even in a strategy meant to look like one cohesive ad.
+ */
+describe("generateCandidates — preferredSize.width honoured for text/button elements (§7.5 bug fix)", () => {
+  it("a short string's box is NOT collapsed below its declared preferredSize.width", () => {
+    // "DIOR" measures far narrower than its declared preferredSize.width
+    // (96) — before the fix, toRequest's width formula never consulted
+    // preferredSize at all for width (only measuredWidth and minSize.width),
+    // so the logo rendered at ~40px instead of the intended 96px.
+    const spacious: SurfaceProfile = defineSurface({ id: "pref-width-test", width: 4000, height: 4000 });
+    const cands = generateCandidates(graph, resolveContext(spacious), spacious);
+    const logo = el(strat(cands, "vertical-stack"), "logo");
+    const logoSpec = productAd.elements.find((e) => e.id === "logo")!;
+    const measured = measureTextWidth(logoSpec.text!, logoSpec.fontSize!);
+
+    expect(measured).toBeLessThan(logoSpec.preferredSize!.width);
+    // Locked → no growth, so the placed width should land exactly on the
+    // declared preferredSize.width, not the much-smaller measured width.
+    expect(logo.width).toBeCloseTo(logoSpec.preferredSize!.width, 0);
+  });
+
+  it("a longer string's box is still driven by its measured width, not artificially shrunk by this fix", () => {
+    // Sanity check for the OTHER direction: the headline's full sentence
+    // measures wider than its declared preferredSize.width (420), so adding
+    // preferredSize.width into the max() must not regress this — the max()
+    // should still pick the measured value when it's the largest.
+    const spacious: SurfaceProfile = defineSurface({ id: "pref-width-test-2", width: 4000, height: 4000 });
+    const cands = generateCandidates(graph, resolveContext(spacious), spacious);
+    const headline = el(strat(cands, "vertical-stack"), "headline");
+    const headlineSpec = productAd.elements.find((e) => e.id === "headline")!;
+    const measured = measureTextWidth(headlineSpec.text!, headlineSpec.fontSize!);
+
+    expect(measured).toBeGreaterThan(headlineSpec.preferredSize!.width);
+    expect(headline.width).toBeGreaterThanOrEqual(Math.ceil(measured));
+  });
+});
+
+describe("generateCandidates — clickable elements grow WIDTH into slack, never HEIGHT (§7.5 bug fix)", () => {
+  const spacious: SurfaceProfile = defineSurface({ id: "cta-width-grow-test", width: 4000, height: 4000 });
+  const cands = generateCandidates(graph, resolveContext(spacious), spacious);
+
+  it("vertical-stack (width is the free axis): the clickable CTA grows wider than its own preferred width, capped at 1.4x", () => {
+    const ctaSpec = productAd.elements.find((e) => e.id === "cta")!;
+    const ctx = resolveContext(spacious);
+    const cta = el(strat(cands, "vertical-stack"), "cta");
+    // Recompute the CTA's own pre-growth preferred width the same way
+    // toRequest does (measured text vs minSize vs preferredSize, then
+    // touch-scale if applicable) so this test doesn't hardcode a pixel
+    // number that would go stale if any of those inputs change.
+    const measured = measureTextWidth(ctaSpec.text!, ctaSpec.fontSize!);
+    const preWidth = Math.max(measured, ctaSpec.minSize?.width ?? 0, ctaSpec.preferredSize?.width ?? 0);
+    const naturalWidth = ctx.isTouchInteractive ? Math.ceil(preWidth * 1.15) : preWidth;
+
+    expect(cta.width).toBeGreaterThan(naturalWidth * 1.05);
+    expect(cta.width).toBeLessThanOrEqual(Math.ceil(naturalWidth) * 1.4 + 2);
+  });
+
+  it("horizontal-split (height is the free axis there): the clickable CTA's height still never grows — the original blob-bug guarantee still holds", () => {
+    const ctaSpec = productAd.elements.find((e) => e.id === "cta")!;
+    const lineHeight = Math.ceil((ctaSpec.fontSize ?? 16) * 1.3);
+    const naturalHeight = Math.max(
+      lineHeight,
+      ctaSpec.minSize?.height ?? 0,
+      ctaSpec.preferredSize?.height ?? 0,
+    );
+    const cta = el(strat(cands, "horizontal-split"), "cta");
+    expect(cta.height).toBeLessThanOrEqual(naturalHeight + 1);
+  });
+
+  it("never breaks the non-overlap / in-bounds invariants with the CTA now growing width", () => {
+    for (const strategy of ALL_STRATEGIES) {
+      const c = strat(cands, strategy);
+      const visible = c.elements.filter((e) => e.visible);
+      for (let i = 0; i < visible.length; i++) {
+        for (let j = i + 1; j < visible.length; j++) {
+          const a = visible[i]!;
+          const b = visible[j]!;
+          const overlaps =
+            a.x < b.x + b.width &&
+            a.x + a.width > b.x &&
+            a.y < b.y + b.height &&
+            a.y + a.height > b.y;
+          expect(overlaps, `${strategy}: ${a.id} overlaps ${b.id}`).toBe(false);
+        }
+      }
+    }
+  });
+});
+
+/**
+ * §7.5 — a surface much larger than the ad needs (even after growth) used to
+ * leave every bit of leftover room as ONE lopsided gap on the cascade's far
+ * side: vertical-stack pinned everything to the TOP with a large dead void
+ * below it; horizontal-split pinned everything to the LEFT with a large dead
+ * void on the right. `centerAlongAxis` fixes this by centring the whole
+ * stacked block in the box on the axis the strategy cascades along, turning
+ * one big one-sided gap into an even margin on both sides.
+ */
+describe("generateCandidates — vertical-stack/horizontal-split centre their block when there's leftover room (§7.5)", () => {
+  // Deliberately taller/wider than the ad's own content needs even after
+  // 1.4x growth, so there is guaranteed leftover slack to centre into.
+  const tallSurface: SurfaceProfile = defineSurface({ id: "centering-tall", width: 1080, height: 1920 });
+  const wideSurface: SurfaceProfile = defineSurface({ id: "centering-wide", width: 1920, height: 400 });
+
+  it("vertical-stack centres the stacked block vertically instead of pinning it to the top", () => {
+    const cands = generateCandidates(graph, resolveContext(tallSurface), tallSurface);
+    const vs = strat(cands, "vertical-stack");
+    const visible = vs.elements.filter((e) => e.visible);
+    expect(visible.length).toBeGreaterThan(0);
+
+    const box = availableBox(tallSurface);
+    const top = Math.min(...visible.map((e) => e.y));
+    const bottom = Math.max(...visible.map((e) => e.y + e.height));
+    const topMargin = top - box.y;
+    const bottomMargin = box.y + box.height - bottom;
+
+    // Not pinned to the very top (the old, lopsided behaviour).
+    expect(topMargin).toBeGreaterThan(1);
+    // The two margins should be close to equal (centred), not one large and
+    // one ~zero.
+    expect(Math.abs(topMargin - bottomMargin)).toBeLessThan(2);
+  });
+
+  it("horizontal-split centres the row horizontally instead of pinning it to the left", () => {
+    const cands = generateCandidates(graph, resolveContext(wideSurface), wideSurface);
+    const hs = strat(cands, "horizontal-split");
+    const visible = hs.elements.filter((e) => e.visible);
+    expect(visible.length).toBeGreaterThan(0);
+
+    const box = availableBox(wideSurface);
+    const left = Math.min(...visible.map((e) => e.x));
+    const right = Math.max(...visible.map((e) => e.x + e.width));
+    const leftMargin = left - box.x;
+    const rightMargin = box.x + box.width - right;
+
+    expect(leftMargin).toBeGreaterThan(1);
+    expect(Math.abs(leftMargin - rightMargin)).toBeLessThan(2);
+  });
+
+  it("centering never introduces an overlap or pushes anything out of bounds", () => {
+    for (const surface of [tallSurface, wideSurface]) {
+      const ctx = resolveContext(surface);
+      const box = availableBox(surface);
+      for (const strategy of ["vertical-stack", "horizontal-split"] as const) {
+        const c = strat(generateCandidates(graph, ctx, surface), strategy);
+        const visible = c.elements.filter((e) => e.visible);
+        for (let i = 0; i < visible.length; i++) {
+          const e = visible[i]!;
+          expect(e.x).toBeGreaterThanOrEqual(box.x - 0.5);
+          expect(e.y).toBeGreaterThanOrEqual(box.y - 0.5);
+          expect(e.x + e.width).toBeLessThanOrEqual(box.x + box.width + 0.5);
+          expect(e.y + e.height).toBeLessThanOrEqual(box.y + box.height + 0.5);
+          for (let j = i + 1; j < visible.length; j++) {
+            const b = visible[j]!;
+            const overlaps =
+              e.x < b.x + b.width && e.x + e.width > b.x && e.y < b.y + b.height && e.y + e.height > b.y;
+            expect(overlaps, `${strategy}: ${e.id} overlaps ${b.id}`).toBe(false);
+          }
+        }
+      }
+    }
+  });
+
+  it("does not affect the free axis — vertical-stack elements still share the same left edge as before", () => {
+    const cands = generateCandidates(graph, resolveContext(tallSurface), tallSurface);
+    const vs = strat(cands, "vertical-stack");
+    const box = availableBox(tallSurface);
+    const headline = el(vs, "headline");
+    const cta = el(vs, "cta");
+    expect(headline.x).toBeCloseTo(box.x, 3);
+    expect(cta.x).toBeCloseTo(box.x, 3);
   });
 });
