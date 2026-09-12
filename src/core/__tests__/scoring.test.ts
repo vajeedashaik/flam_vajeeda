@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { scoreCandidate } from "../scoring";
-import type { Candidate } from "../candidates";
+import { scoreCandidate, computeAdjacencyFit } from "../scoring";
+import { availableBox, generateCandidates, type Candidate } from "../candidates";
 import { buildGraph } from "../graph";
+import type { ExperienceGraph } from "../graph";
 import { resolveContext } from "../context";
 import { productAd, surfaceProfiles } from "../sample-data";
 import type { ResolvedElement } from "../resolver";
@@ -146,5 +147,211 @@ describe("scoreCandidate — contextFit (§4.3-context)", () => {
     const a = scoreCandidate(cleanCandidate(), graph, ctx, surfaceProfiles.retailKiosk);
     const b = scoreCandidate(cleanCandidate(), graph, ctx, surfaceProfiles.printQRPanel);
     expect(a.contextFit).toBe(b.contextFit);
+  });
+});
+
+/**
+ * §7.1 — computeAdjacencyFit consumes graph.edges' "proximity" data (Rule P:
+ * every "secondary" role paired with every "action" role). The sample spec
+ * has exactly one such edge: price (secondary) ↔ cta (action).
+ */
+describe("computeAdjacencyFit (§7.1: wiring the Experience Graph's proximity edges into scoring)", () => {
+  it("scores a proximity-linked pair placed close together higher than the same pair in opposite corners", () => {
+    const kiosk = surfaceProfiles.retailKiosk; // roomy — corners are genuinely far apart
+    const box = availableBox(kiosk);
+
+    const close = cleanCandidate(); // headline/cta/product-image stacked, price dropped — replace price with a close placement
+    close.elements[3] = vis("price", "secondary", 48, 246, 140, 48); // directly beside the cta (48,160,200,64)
+
+    const far: Candidate = {
+      strategy: "overlay-safe-margins",
+      notes: [],
+      elements: [
+        vis("headline", "primary", box.x, box.y, 420, 96),
+        vis("cta", "action", box.x, box.y, 200, 64), // top-left corner
+        dropped("product-image", "hero"),
+        vis("price", "secondary", box.x + box.width - 140, box.y + box.height - 48, 140, 48), // opposite, bottom-right corner
+        dropped("logo", "branding"),
+      ],
+    };
+
+    const closeScore = computeAdjacencyFit(close, graph, kiosk);
+    const farScore = computeAdjacencyFit(far, graph, kiosk);
+    expect(closeScore).toBeGreaterThan(farScore);
+  });
+
+  it("returns a neutral 100 for a graph with zero proximity edges", () => {
+    const noProximityGraph: ExperienceGraph = {
+      nodes: graph.nodes,
+      edges: graph.edges.filter((e) => e.type !== "proximity"),
+    };
+    expect(computeAdjacencyFit(cleanCandidate(), noProximityGraph, surface)).toBe(100);
+  });
+
+  it("skips a pair where one element was dropped — neutral, not penalized", () => {
+    const ctaDropped: Candidate = {
+      strategy: "vertical-stack",
+      notes: [],
+      elements: [
+        vis("headline", "primary", 48, 48, 420, 96),
+        dropped("cta", "action"),
+        vis("product-image", "hero", 48, 160, 480, 480),
+        vis("price", "secondary", 48, 650, 140, 48),
+        dropped("logo", "branding"),
+      ],
+    };
+    // The only proximity edge (price ↔ cta) has its cta endpoint dropped, so
+    // there are zero EVALUABLE pairs — same neutral outcome as no edges at all.
+    expect(computeAdjacencyFit(ctaDropped, graph, surface)).toBe(100);
+  });
+
+  it("is deterministic — identical inputs produce an identical score", () => {
+    const a = computeAdjacencyFit(cleanCandidate(), graph, surface);
+    const b = computeAdjacencyFit(cleanCandidate(), graph, surface);
+    expect(a).toBe(b);
+  });
+
+  it("on a real surface where overlay-safe-margins spreads price/cta into opposite corners, a candidate that keeps them close scores strictly higher adjacencyFit — proving the graph's proximity data now has a real effect", () => {
+    const kiosk = surfaceProfiles.retailKiosk;
+    const kioskCtx = resolveContext(kiosk);
+    const candidates = generateCandidates(graph, kioskCtx, kiosk);
+    const overlay = candidates.find((c) => c.strategy === "overlay-safe-margins")!;
+    const verticalStack = candidates.find((c) => c.strategy === "vertical-stack")!;
+
+    // Sanity: confirm this candidate really is the far-corners shape the
+    // phase 7 bug report describes — cta and price several hundred px apart.
+    const overlayCta = overlay.elements.find((e) => e.id === "cta")!;
+    const overlayPrice = overlay.elements.find((e) => e.id === "price")!;
+    expect(overlayCta.visible && overlayPrice.visible).toBe(true);
+    const overlayDist = Math.hypot(
+      overlayCta.x + overlayCta.width / 2 - (overlayPrice.x + overlayPrice.width / 2),
+      overlayCta.y + overlayCta.height / 2 - (overlayPrice.y + overlayPrice.height / 2),
+    );
+    expect(overlayDist).toBeGreaterThan(500); // genuinely far apart, not a rounding artifact
+
+    const overlayAdjacency = computeAdjacencyFit(overlay, graph, kiosk);
+    const verticalAdjacency = computeAdjacencyFit(verticalStack, graph, kiosk);
+    expect(verticalAdjacency).toBeGreaterThan(overlayAdjacency);
+
+    // And it is not just an isolated sub-score number: scoreCandidate's overall
+    // weighted total now reports this same gap as part of `adjacencyFit`, so
+    // it genuinely feeds into which candidate the resolver prefers.
+    const overlayFull = scoreCandidate(overlay, graph, kioskCtx, kiosk);
+    const verticalFull = scoreCandidate(verticalStack, graph, kioskCtx, kiosk);
+    expect(overlayFull.adjacencyFit).toBe(overlayAdjacency);
+    expect(verticalFull.adjacencyFit).toBe(verticalAdjacency);
+  });
+
+  it("full pipeline: the resolver's actual winner on a wide sample surface now scores at least as well on adjacencyFit as the old far-corners overlay-safe-margins arrangement did", () => {
+    // broadcastLowerThird is the wide surface where overlay-safe-margins used
+    // to win outright (84/100) with price/cta in opposite corners before this
+    // phase. After wiring adjacencyFit in, confirm whichever candidate now
+    // wins is not worse, on element grouping, than that old arrangement.
+    const wide = surfaceProfiles.broadcastLowerThird;
+    const wideCtx = resolveContext(wide);
+    const candidates = generateCandidates(graph, wideCtx, wide);
+    const overlay = candidates.find((c) => c.strategy === "overlay-safe-margins")!;
+    const overlayAdjacency = computeAdjacencyFit(overlay, graph, wide);
+
+    const scores = candidates.map((c) => scoreCandidate(c, graph, wideCtx, wide));
+    let winningIndex = 0;
+    for (let i = 1; i < scores.length; i++) {
+      if (scores[i]!.overall > scores[winningIndex]!.overall) winningIndex = i;
+    }
+    const winner = candidates[winningIndex]!;
+    const winnerScore = scores[winningIndex]!;
+
+    expect(winnerScore.adjacencyFit).toBeGreaterThanOrEqual(overlayAdjacency);
+    // The old bug's exact symptom (winner === overlay-safe-margins with a
+    // near-worst adjacencyFit) must no longer be the outcome here.
+    if (winner.strategy === "overlay-safe-margins") {
+      expect(winnerScore.adjacencyFit).toBeGreaterThan(overlayAdjacency);
+    }
+  });
+});
+
+/**
+ * §7.2 — audit of visualBalance's actual behaviour. Before this phase, it was
+ * suspected of rewarding "spread out" layouts, which would fight directly
+ * against adjacencyFit. Investigation (see ARCHITECTURE.md §4e) found that
+ * visualBalanceScore measures two things ONLY: how close the area-WEIGHTED
+ * CENTROID of all visible elements sits to the box centre, and how even their
+ * areas are — neither of which is "inter-element distance." A symmetric
+ * arrangement has the same centroid whether its elements are clustered
+ * together or pushed to opposite corners, so the formula is provably
+ * INDIFFERENT to spread, not a reward for it. No formula change was made;
+ * this test documents that actual, intended behaviour explicitly, closing the
+ * "no dedicated test" gap the phase brief called out.
+ */
+describe("scoreCandidate — visualBalance (§7.2 audit: confirms it does not reward spreading elements apart)", () => {
+  it("scores a symmetric close cluster the same as the same two elements pushed to opposite corners, when both are centred on the box", () => {
+    const kiosk = surfaceProfiles.retailKiosk;
+    const box = availableBox(kiosk);
+    const cx = box.x + box.width / 2;
+    const cy = box.y + box.height / 2;
+
+    const clustered: Candidate = {
+      strategy: "vertical-stack",
+      notes: [],
+      elements: [
+        vis("headline", "primary", cx - 110, cy - 50, 100, 100),
+        vis("cta", "action", cx + 10, cy - 50, 100, 100),
+        dropped("product-image", "hero"),
+        dropped("price", "secondary"),
+        dropped("logo", "branding"),
+      ],
+    };
+    const spread: Candidate = {
+      strategy: "overlay-safe-margins",
+      notes: [],
+      elements: [
+        vis("headline", "primary", box.x, box.y, 100, 100),
+        vis("cta", "action", box.x + box.width - 100, box.y + box.height - 100, 100, 100),
+        dropped("product-image", "hero"),
+        dropped("price", "secondary"),
+        dropped("logo", "branding"),
+      ],
+    };
+
+    const clusteredScore = scoreCandidate(clustered, graph, ctx, kiosk).visualBalance;
+    const spreadScore = scoreCandidate(spread, graph, ctx, kiosk).visualBalance;
+
+    // Same area-weighted centroid (both symmetric around the box centre) and
+    // same size-evenness (identical element sizes) → the formula cannot tell
+    // them apart, by design of what it measures.
+    expect(clusteredScore).toBe(spreadScore);
+  });
+
+  it("rewards an off-centre candidate less than an otherwise-identical centred one", () => {
+    const kiosk = surfaceProfiles.retailKiosk;
+    const box = availableBox(kiosk);
+    const cx = box.x + box.width / 2;
+    const cy = box.y + box.height / 2;
+
+    const centred: Candidate = {
+      strategy: "vertical-stack",
+      notes: [],
+      elements: [
+        vis("headline", "primary", cx - 100, cy - 50, 200, 100),
+        dropped("cta", "action"),
+        dropped("product-image", "hero"),
+        dropped("price", "secondary"),
+        dropped("logo", "branding"),
+      ],
+    };
+    const offCentre: Candidate = {
+      ...centred,
+      elements: [
+        vis("headline", "primary", box.x, box.y, 200, 100), // jammed into the top-left corner
+        dropped("cta", "action"),
+        dropped("product-image", "hero"),
+        dropped("price", "secondary"),
+        dropped("logo", "branding"),
+      ],
+    };
+
+    const centredScore = scoreCandidate(centred, graph, ctx, kiosk).visualBalance;
+    const offCentreScore = scoreCandidate(offCentre, graph, ctx, kiosk).visualBalance;
+    expect(centredScore).toBeGreaterThan(offCentreScore);
   });
 });
