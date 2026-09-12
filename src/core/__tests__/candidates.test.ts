@@ -305,8 +305,11 @@ describe("generateCandidates — emergency-fit: always-visible elements survive 
   // strategy cascades to drop everything, including visibility:"always"
   // elements, because 100 < 180 no matter how the box is sliced.
   const tooNarrow: SurfaceProfile = defineSurface({ id: "too-narrow", width: 100, height: 600 });
-  // Tall enough for headline alone, but not for headline + cta together —
-  // exercises the "each always-element claims only a small share" behaviour.
+  // A real, standard mobile-banner ad size (320×50) — too short for a single
+  // COLUMN of all 4 always-elements (4 × 16px floor = 64px > 50px available),
+  // but comfortably wide enough for a ROW of them. Exercises §7.7's
+  // orientation-aware emergency floor (mirrors vertical-stack/horizontal-split's
+  // own duality) rather than a fixed single-axis cascade.
   const tooShort: SurfaceProfile = defineSurface({ id: "too-short", width: 320, height: 50 });
 
   it("width below headline's declared minSize: the normal 4 strategies all hard-fail to 0", () => {
@@ -341,13 +344,31 @@ describe("generateCandidates — emergency-fit: always-visible elements survive 
     expect(winnerScore).toBeGreaterThan(0);
   });
 
-  it("height too short for both always-elements together: emergency-fit still fits both by claiming only a small share each", () => {
+  it("height too short for a COLUMN of always-elements: emergency-fit switches to a ROW and fits all 4, not just headline+cta", () => {
     const ctx = resolveContext(tooShort);
     const cands = generateCandidates(buildGraph(productAd), ctx, tooShort);
     const emergency = strat(cands, "emergency-fit");
 
-    expect(el(emergency, "headline").visible).toBe(true);
-    expect(el(emergency, "cta").visible).toBe(true);
+    for (const id of ["headline", "cta", "price", "logo"]) {
+      expect(el(emergency, id).visible, `${id} should survive on a 320×50 banner`).toBe(true);
+    }
+  });
+
+  it("REGRESSION GUARD (§7.7): the 4 'info' elements survive on real, standard ad sizes too small for a single-column emergency floor", () => {
+    // 320×50 (mobile banner) and 728×90 (leaderboard) are real IAB ad units,
+    // not synthetic edge cases — both are shorter than 4 always-elements
+    // stacked in one column (4 × 16px = 64px) but wide enough for a row.
+    for (const [width, height] of [
+      [320, 50],
+      [728, 90],
+    ] as const) {
+      const surface: SurfaceProfile = defineSurface({ id: `standard-${width}x${height}`, width, height });
+      const { layout, trace } = resolveLayout(buildGraph(productAd), resolveContext(surface), surface);
+      for (const id of ["headline", "cta", "price", "logo"]) {
+        const e = layout.elements.find((el) => el.id === id);
+        expect(e?.visible, `${width}×${height}: ${id} should be visible (winner: ${trace.winningStrategy})`).toBe(true);
+      }
+    }
   });
 
   it("on a normal, spacious surface, emergency-fit never wins — it always forces always-elements small, so it always carries a self-inflicted 'below minSize' penalty vertical-stack doesn't have", () => {
