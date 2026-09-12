@@ -25,11 +25,12 @@ describe("buildGraph — sample spec", () => {
     );
 
     const logo = graph.nodes.find((n) => n.id === "logo");
-    // §7.7: logo priority 5→4 and importance nice-to-have→critical — promoted
-    // to visibility:"always" alongside price, so it is never the element
-    // sacrificed first; product-image (priority 5 now) is.
-    expect(logo?.priority).toBe(4);
-    expect(logo?.importance).toBe("critical");
+    // §7.8: logo is back to priority 5 / importance "nice-to-have" (§7.7 had
+    // briefly promoted it) — product-image is the protected highlight now,
+    // and logo (with price) is one of the two elements allowed to degrade
+    // first under real space pressure.
+    expect(logo?.priority).toBe(5);
+    expect(logo?.importance).toBe("nice-to-have");
     expect(logo?.preferredSize).toEqual({ width: 96, height: 32 });
     expect(logo?.brandRules).toEqual({
       locked: true,
