@@ -27,8 +27,10 @@ function dropped(id: string, role: string): ResolvedElement {
 }
 
 /**
- * A clean, valid layout: three non-overlapping in-bounds boxes inside the safe
- * area, keeping priorities 1-3 and dropping 4-5 (no priority inversion). The
+ * A clean, valid layout: four non-overlapping in-bounds boxes inside the safe
+ * area, keeping priorities 1-4 (headline, cta, price, logo — all
+ * `visibility: "always"` since §7.7) and dropping only product-image
+ * (priority 5, the sole `"degradable"` element — no priority inversion). The
  * cta meets retailKiosk's 60px minTapTarget.
  */
 function cleanCandidate(): Candidate {
@@ -38,9 +40,9 @@ function cleanCandidate(): Candidate {
     elements: [
       vis("headline", "primary", 48, 48, 420, 96),
       vis("cta", "action", 48, 160, 200, 64),
-      vis("product-image", "hero", 48, 240, 480, 480),
-      dropped("price", "secondary"),
-      dropped("logo", "branding"),
+      vis("price", "secondary", 48, 240, 150, 48),
+      vis("logo", "branding", 48, 300, 96, 32),
+      dropped("product-image", "hero"),
     ],
   };
 }
@@ -243,16 +245,22 @@ describe("computeAdjacencyFit (§7.1: wiring the Experience Graph's proximity ed
     expect(verticalFull.adjacencyFit).toBe(verticalAdjacency);
   });
 
-  it("full pipeline: the resolver's actual winner on a wide sample surface now scores at least as well on adjacencyFit as the old far-corners overlay-safe-margins arrangement did", () => {
+  it("full pipeline: the resolver's actual winner on a wide sample surface beats overlay-safe-margins outright and shows strictly more content", () => {
     // broadcastLowerThird is the wide surface where overlay-safe-margins used
-    // to win outright (84/100) with price/cta in opposite corners before this
-    // phase. After wiring adjacencyFit in, confirm whichever candidate now
-    // wins is not worse, on element grouping, than that old arrangement.
+    // to win outright (84/100) with price/cta in opposite corners before §7.1.
+    // §7.7 promoted price/logo to visibility:"always", which changes
+    // overlay-safe-margins's OWN 4-corner shape too (it now seats the 4
+    // always-elements and drops product-image instead of logo) — so its own
+    // price↔cta adjacency can coincidentally improve. The invariant that
+    // actually matters is unchanged: overlay's scattered/incomplete
+    // composition must not be the resolver's actual choice, and whichever
+    // candidate wins must show at least as much content.
     const wide = surfaceProfiles.broadcastLowerThird;
     const wideCtx = resolveContext(wide);
     const candidates = generateCandidates(graph, wideCtx, wide);
     const overlay = candidates.find((c) => c.strategy === "overlay-safe-margins")!;
-    const overlayAdjacency = computeAdjacencyFit(overlay, graph, wide);
+    const overlayScore = scoreCandidate(overlay, graph, wideCtx, wide);
+    const overlayVisible = overlay.elements.filter((e) => e.visible).length;
 
     const scores = candidates.map((c) => scoreCandidate(c, graph, wideCtx, wide));
     let winningIndex = 0;
@@ -261,13 +269,11 @@ describe("computeAdjacencyFit (§7.1: wiring the Experience Graph's proximity ed
     }
     const winner = candidates[winningIndex]!;
     const winnerScore = scores[winningIndex]!;
+    const winnerVisible = winner.elements.filter((e) => e.visible).length;
 
-    expect(winnerScore.adjacencyFit).toBeGreaterThanOrEqual(overlayAdjacency);
-    // The old bug's exact symptom (winner === overlay-safe-margins with a
-    // near-worst adjacencyFit) must no longer be the outcome here.
-    if (winner.strategy === "overlay-safe-margins") {
-      expect(winnerScore.adjacencyFit).toBeGreaterThan(overlayAdjacency);
-    }
+    expect(winner.strategy).not.toBe("overlay-safe-margins");
+    expect(winnerScore.overall).toBeGreaterThan(overlayScore.overall);
+    expect(winnerVisible).toBeGreaterThanOrEqual(overlayVisible);
   });
 });
 
