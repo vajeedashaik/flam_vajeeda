@@ -200,13 +200,15 @@ export function UnknownSurfaceInput({
             </p>
           )}
 
-          <SurfaceStage
-            surface={result.surface}
-            elements={result.layout.elements}
-            specById={specById}
-            maxWidth={640}
-            maxHeight={520}
-          />
+          <div className="ale-stage-wrap">
+            <SurfaceStage
+              surface={result.surface}
+              elements={result.layout.elements}
+              specById={specById}
+              maxWidth={640}
+              maxHeight={520}
+            />
+          </div>
 
           <div style={{ maxWidth: 560, marginTop: 14 }}>
             <LayoutDebugger trace={result.trace} />
