@@ -33,7 +33,15 @@ export interface ScoreBreakdown {
    * touch. See `contextFitScore` for the exact rule set.
    */
   contextFit: number;
-  /** Weighted sum of the six sub-scores, or 0 on a hard-fail. */
+  /**
+   * 0-100. §7.1: how close each graph-proximity-linked pair of VISIBLE
+   * elements (e.g. `price` ↔ `cta`, Rule P in graph.ts) ended up to each
+   * other. 100 when the graph declares no proximity relationship at all, or
+   * when every proximity pair has a dropped member (nothing to judge). See
+   * `computeAdjacencyFit` for the exact distance/normalization formula.
+   */
+  adjacencyFit: number;
+  /** Weighted sum of the seven sub-scores, or 0 on a hard-fail. */
   overall: number;
 }
 
@@ -49,14 +57,30 @@ export interface ScoreBreakdown {
  * tie-breakers: it decides which of several otherwise-valid strategies suits
  * THIS surface's real-world context, never whether a layout is valid at all.
  * renderCost is only a light tie-breaker.
+ *
+ * §7.1: adjacencyFit is new. It is weighted at 0.10 — deliberately in the same
+ * tier as contextFit/visualBalance, not a light tie-breaker like renderCost —
+ * because the whole point of this phase is that the graph's proximity data
+ * should be able to actually change which candidate wins (verified live: on
+ * a wide, roomy sample surface this shifts the winner away from
+ * `overlay-safe-margins`'s far-corners arrangement — see ARCHITECTURE.md
+ * §4e). To make room for it, every other weight was trimmed by a small,
+ * roughly proportional amount (constraintViolations 0.32→0.30,
+ * priorityPreservation 0.28→0.25, tapTargetCompliance 0.14→0.13, contextFit
+ * 0.10→0.09, visualBalance 0.10→0.08, renderCost 0.06→0.05) rather than
+ * zeroing out any one of them — adjacencyFit earns a real say without being
+ * allowed to dominate the hard-constraint scores, and it NEVER overrides the
+ * separate hard-fail rule below (overlap / out-of-bounds / dropped-always /
+ * priority-inversion still force `overall = 0` regardless of this weight).
  */
 const WEIGHTS = {
-  constraintViolations: 0.32,
-  priorityPreservation: 0.28,
-  tapTargetCompliance: 0.14,
-  contextFit: 0.1,
-  visualBalance: 0.1,
-  renderCost: 0.06,
+  constraintViolations: 0.3,
+  priorityPreservation: 0.25,
+  tapTargetCompliance: 0.13,
+  contextFit: 0.09,
+  visualBalance: 0.08,
+  renderCost: 0.05,
+  adjacencyFit: 0.1,
 } as const;
 
 /** Points removed from constraintViolations per soft violation found. */
@@ -252,6 +276,82 @@ function visualBalanceScore(
 }
 
 /**
+ * adjacencyFit sub-score (§7.1). Consumes `graph.edges` "proximity" data
+ * (Rule P in graph.ts: every "secondary" role paired with every "action"
+ * role, e.g. `price` ↔ `cta`) that, before this phase, was derived but never
+ * read by any strategy or scorer — so a declared relationship had zero effect
+ * on the actual resolved layout. This is what gives it one.
+ *
+ * ALGORITHM
+ *  1. Every proximity edge in the graph is a pair to evaluate. Zero such
+ *     edges (a spec with no secondary+action role pairing) → return a neutral
+ *     100 immediately: a spec with no relational structure is not penalized
+ *     for something it was never asked to satisfy.
+ *  2. For each edge, look up both endpoints in THIS candidate's placed
+ *     elements. If either is missing or `visible: false` (dropped), skip the
+ *     pair entirely — it does not contribute to the average at all, in
+ *     either direction. Rationale: "far from its partner" is a meaningless
+ *     complaint about an element that isn't on screen; that a `visibility:
+ *     "always"` element was dropped is already a separate hard-fail
+ *     (`dropsAnAlwaysElement`), and a degradable one being dropped is already
+ *     penalized by `priorityPreservationScore` — this sub-score only has an
+ *     opinion about geometry among elements that actually made it onto the
+ *     candidate.
+ *  3. For each evaluated pair, take the Euclidean distance between the two
+ *     elements' bounding-box CENTERS, normalized by the usable box's
+ *     diagonal (`availableBox` — the same reference `visualBalanceScore`
+ *     already uses for its own centering distance, so the two sub-scores
+ *     agree on what "far" means on this surface; chosen over "average
+ *     element size" specifically so a pair's score reflects their placement
+ *     on THIS surface, not their own dimensions — two small elements pinned
+ *     to opposite corners of a huge surface should score just as poorly as
+ *     two large ones would). Score per pair = `(1 − min(1, distance / diagonal)) × 100`:
+ *     0 distance → 100, a full-diagonal-or-further separation → 0, linear
+ *     between. No unexplained magic numbers — it is a plain normalized
+ *     inverse-distance score.
+ *  4. Average the per-pair scores. If every pair was skipped (step 2), the
+ *     average is undefined — return the same neutral 100 as "no edges at
+ *     all," for the same reason.
+ *
+ * Pure and deterministic: depends only on the candidate's placed geometry,
+ * the graph's proximity edges, and the surface's usable box.
+ */
+export function computeAdjacencyFit(
+  candidate: Candidate,
+  graph: ExperienceGraph,
+  surface: SurfaceProfile,
+): number {
+  const proximityEdges = graph.edges.filter((edge) => edge.type === "proximity");
+  if (proximityEdges.length === 0) return 100;
+
+  const elementsById = new Map(candidate.elements.map((e) => [e.id, e]));
+  const box = availableBox(surface);
+  const diagonal = Math.hypot(box.width, box.height) || 1;
+
+  let total = 0;
+  let evaluated = 0;
+
+  for (const edge of proximityEdges) {
+    const a = elementsById.get(edge.from);
+    const b = elementsById.get(edge.to);
+    if (!a || !b || !a.visible || !b.visible) continue;
+
+    const ax = a.x + a.width / 2;
+    const ay = a.y + a.height / 2;
+    const bx = b.x + b.width / 2;
+    const by = b.y + b.height / 2;
+    const distance = Math.hypot(ax - bx, ay - by);
+    const normalized = Math.min(1, distance / diagonal);
+
+    total += (1 - normalized) * 100;
+    evaluated++;
+  }
+
+  if (evaluated === 0) return 100;
+  return Math.round(total / evaluated);
+}
+
+/**
  * tapTargetCompliance sub-score. 100 when the surface has no minTapTarget or no
  * interactive element is visible; otherwise the percentage of visible
  * interactive elements that meet the minimum on both axes.
@@ -377,6 +477,7 @@ export function scoreCandidate(
     tapTargetCompliance: tapTargetComplianceScore(candidate, byId, surface),
     renderCost: renderCostScore(candidate, surface),
     contextFit: contextFitScore(candidate, context),
+    adjacencyFit: computeAdjacencyFit(candidate, graph, surface),
   };
 
   const hardFail =
@@ -392,7 +493,8 @@ export function scoreCandidate(
     sub.tapTargetCompliance * WEIGHTS.tapTargetCompliance +
     sub.contextFit * WEIGHTS.contextFit +
     sub.visualBalance * WEIGHTS.visualBalance +
-    sub.renderCost * WEIGHTS.renderCost;
+    sub.renderCost * WEIGHTS.renderCost +
+    sub.adjacencyFit * WEIGHTS.adjacencyFit;
 
   return { ...sub, overall: hardFail ? 0 : Math.round(weighted) };
 }
