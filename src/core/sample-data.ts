@@ -50,57 +50,63 @@ export const productAd: AdSpec = defineAd({
       preferredSize: { width: 200, height: 56 },
     },
     {
-      // §7.7: promoted to `visibility: "always"`, same guarantee headline/cta
-      // already had — the ad's "4 infos" (headline, cta, price, logo) must
-      // all survive on every surface, in some form, even if only at
-      // emergency-fit's tiny floor size. priority also moves 4→3 (still
-      // below headline/cta, but now ABOVE product-image) so it is never the
-      // element sacrificed to make room for the photo.
-      id: "price",
-      type: "text",
-      role: "secondary",
+      // §7.8: direct follow-up feedback reversed part of §7.7 — the product
+      // photo is "the highlight" and must survive in most cases even when
+      // OTHER elements (price, logo) are the ones sacrificed under real space
+      // pressure. Promoted to `visibility: "always"` (same guarantee
+      // headline/cta already have) and priority 5→3, immediately after
+      // cta — protected, but still behind the two elements that carry the
+      // ad's core message and action. It already grows/shrinks exactly like
+      // any other non-locked, non-interactive element (§7.5/§7.6's growth and
+      // centring fixes apply to it unchanged) — "handled carefully while
+      // being responsive" was already true of its sizing; what was missing
+      // was the visibility guarantee, which this adds.
+      id: "product-image",
+      type: "image",
+      role: "hero",
       priority: 3,
       importance: "critical",
       interaction: "static",
       visibility: "always",
+      src: "/products/dior-backstage-rosy-glow.png",
+      minSize: { width: 96, height: 96 },
+      preferredSize: { width: 480, height: 480 },
+    },
+    {
+      // §7.8: reverted from §7.7's promotion — price is now the FIRST of the
+      // two supporting-detail elements allowed to degrade (shrink hardest, or
+      // drop) under real space pressure, so the image never has to give way
+      // to it. priority 3→4.
+      id: "price",
+      type: "text",
+      role: "secondary",
+      priority: 4,
+      importance: "should-survive",
+      interaction: "static",
+      visibility: "degradable",
       text: "₹2,900 · Shade 012 Rosewood",
       fontSize: 15,
       minSize: { width: 64, height: 24 },
       preferredSize: { width: 140, height: 48 },
     },
     {
-      // §7.7: same promotion as price — the brand mark is one of the "4
-      // infos", not a decoration to drop first. priority moves 5→4.
+      // §7.8: reverted from §7.7's promotion — back to the lowest-priority,
+      // first-to-drop element, exactly as it was before §7.7 (which is what
+      // let the "always" guarantee concentrate on headline/cta/product-image,
+      // the three elements that actually define the ad, instead of spreading
+      // it across five and making the emergency floor harder to satisfy).
       id: "logo",
       type: "text",
       role: "branding",
-      priority: 4,
-      importance: "critical",
+      priority: 5,
+      importance: "nice-to-have",
       interaction: "static",
-      visibility: "always",
+      visibility: "decorative-only",
       text: "DIOR",
       fontSize: 18,
       minSize: { width: 24, height: 24 },
       preferredSize: { width: 96, height: 32 },
       brandRules: { locked: true, minSize: { width: 24, height: 24 } },
-    },
-    {
-      // §7.7: priority demoted 3→5 (now the LOWEST) — the product photo is
-      // the one visual asset allowed to shrink hardest or drop first when a
-      // surface can't fit everything, precisely so the four TEXT/info
-      // elements (headline, cta, price, logo) never have to give way to it.
-      // Still `visibility: "degradable"`, unchanged — this is the intentional
-      // trade-off, not an oversight.
-      id: "product-image",
-      type: "image",
-      role: "hero",
-      priority: 5,
-      importance: "should-survive",
-      interaction: "static",
-      visibility: "degradable",
-      src: "/products/dior-backstage-rosy-glow.png",
-      minSize: { width: 96, height: 96 },
-      preferredSize: { width: 480, height: 480 },
     },
   ],
 });
