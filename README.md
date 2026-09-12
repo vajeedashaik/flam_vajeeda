@@ -16,6 +16,12 @@ Every resolution carries a decision trace explaining what was chosen and why.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design.
 
+**Contents:** [Setup](#setup) · [Running the demo](#running-the-demo) ·
+[Feature overview](#feature-overview) · [Known limitations](#known-limitations) ·
+[Time spent](#time-spent) · [AI tool disclosure](#ai-tool-disclosure) ·
+[Live demo](#live-demo) · [Bonus points](#bonus-points) ·
+[Project layout](#project-layout)
+
 ---
 
 ## Setup
@@ -187,8 +193,10 @@ Locally: `npm run build && npm run preview` → http://localhost:4173
 
 ## Bonus points
 
-Verdict per differentiator feature from the project plan (`§4.x`). "Partial"
-means the mechanism exists but is not fully wired through.
+Where the feature table above maps to the grading rubric, this one maps to the
+project plan's own differentiator list (`§4.x`) and gives a verdict for each —
+**Implemented**, **Partial** (the mechanism exists but is not fully wired
+through), or **Skipped**.
 
 | # | Feature | Status | Notes |
 |---|---|---|---|
