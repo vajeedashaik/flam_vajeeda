@@ -212,3 +212,56 @@ describe("generateCandidates — grow into slack, capped, brand-lock exempt", ()
     }
   });
 });
+
+describe("generateCandidates — clickable sizing targets the surface's real minTapTarget", () => {
+  // Found via Stress Lab: a random touch surface with a demanding minTapTarget
+  // (up to 96px) still scored 0 on tapTargetCompliance every time, because the
+  // old flat 1.15x touch-scale bumped the CTA's own preferred size without
+  // ever looking at what the SURFACE actually required — it could bump a
+  // ~50px button to ~58px and call it "touch-aware" while the surface asked
+  // for 96px. A spacious surface isolates sizing from the shrink cascade.
+  // 300 is deliberately far above anything else that inflates size on this
+  // surface — touch-scale (1.15x) and vertical-stack's width-growth cap
+  // (1.4x) on a ~120-138px natural CTA top out well under 200, and headline's
+  // own declared preferredSize.height is 96 — so 300 can only be reached by
+  // this fix actually targeting minTapTarget, never by coincidence.
+  const spaciousSurface: SurfaceProfile = defineSurface({
+    id: "min-tap-target-test-surface",
+    width: 4000,
+    height: 4000,
+    touchOnly: true,
+    minTapTarget: 300,
+  });
+  const ctx = resolveContext(spaciousSurface);
+  const cands = generateCandidates(graph, ctx, spaciousSurface);
+  const cta = el(strat(cands, "vertical-stack"), "cta");
+
+  it("sizes the clickable CTA to at least the surface's declared minTapTarget on both axes", () => {
+    expect(cta.width).toBeGreaterThanOrEqual(300);
+    expect(cta.height).toBeGreaterThanOrEqual(300);
+  });
+
+  it("does not inflate the non-clickable headline to the tap-target floor", () => {
+    const headline = el(strat(cands, "vertical-stack"), "headline");
+    expect(headline.height).toBeLessThan(150);
+  });
+
+  it("a surface with no minTapTarget declared is unaffected (existing behaviour preserved)", () => {
+    const noTapTarget: SurfaceProfile = defineSurface({
+      id: "no-tap-target-surface",
+      width: 4000,
+      height: 4000,
+    });
+    // horizontal-split's WIDTH is the shrink-only cascading axis (no growth),
+    // so this isolates "did minTapTarget inflate it" from the separately
+    // tested width-growth behaviour on vertical-stack.
+    const ctaWithout = el(
+      strat(
+        generateCandidates(graph, resolveContext(noTapTarget), noTapTarget),
+        "horizontal-split",
+      ),
+      "cta",
+    );
+    expect(ctaWithout.width).toBeLessThan(200);
+  });
+});
