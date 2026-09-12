@@ -173,15 +173,17 @@ export function DegradationSlider({
         <span className="ale-chip">{trace.winningStrategy}</span>
       </p>
 
-      <SurfaceStage
-        surface={surface}
-        elements={layout.elements}
-        specById={specById}
-        trace={trace}
-        showDebug={showDebug}
-        maxWidth={520}
-        maxHeight={420}
-      />
+      <div className="ale-stage-wrap">
+        <SurfaceStage
+          surface={surface}
+          elements={layout.elements}
+          specById={specById}
+          trace={trace}
+          showDebug={showDebug}
+          maxWidth={520}
+          maxHeight={420}
+        />
+      </div>
     </section>
   );
 }
