@@ -599,9 +599,57 @@ headline → CTA → product image → price → logo, exactly how a real produc
 reads. `scoring.test.ts` has a permanent regression guard asserting
 `overlay-safe-margins` is never the real resolver's winning strategy on any of
 the 5 sample surfaces. The Stress Lab's robustness figure improved as a
-side-effect (88.5% vs. the prior 84.0%) because the surfaces that now resolve
+side-effect at the time (88.5% vs. the prior 84.0%; see §7.5 below for the following change that brought it to 82.5%) because the surfaces that now resolve
 to a cohesive strategy also keep more elements visible than the old
 scattered winner did.
+
+### Three more real bugs found by inspecting the live-rendered ad (§7.5)
+
+`compositionCohesion` fixed which STRATEGY wins; it can't fix a strategy's own
+placement bugs. Live-testing the fix surfaced three more, in the actual
+rendered pixels rather than the score numbers:
+
+1. **A locked brand logo rendered illegibly small.** `toRequest()`'s
+   text/button width formula was `Math.max(measuredWidth, minSize.width)` —
+   it never consulted `preferredSize.width` at all, even though the parallel
+   height formula always has. A short string like `"DIOR"` measures far
+   narrower than its declared `preferredSize.width: 96`, so the logo
+   collapsed to ~40px instead of the size the ad author actually asked for.
+   Fixed by adding `preferredSize.width` into the same `max()` the height
+   branch already used — symmetric with height, and verified not to regress
+   long strings (a measured width that's already the largest of the three
+   still wins, e.g. the headline).
+2. **The CTA button never grew, full stop.** `interactive` elements were
+   exempt from ALL slack-growth (§4c), not just the height axis the original
+   "squat blob" bug was actually about. A button getting WIDER while its
+   height stays fixed is a completely normal "full-width-ish" CTA — nothing
+   like the disproportionate-blob failure mode HEIGHT growth caused on
+   horizontal-split. Narrowed the exemption to height only
+   (`canGrowHeight = !locked && !interactive`; `canGrowWidth = !locked`), so
+   the CTA now fills available horizontal slack on vertical-stack instead of
+   sitting as an undersized pill next to visible dead space, while the
+   original blob-bug regression test (CTA height on horizontal-split) still
+   passes unchanged.
+3. **A cascading strategy pins its whole block to one edge.** vertical-stack
+   and horizontal-split start stacking from the box's own top/left corner —
+   on a surface much larger than the ad needs even after growth (e.g. a
+   1080×1920 kiosk panel under a phone-sized ad), every bit of leftover room
+   became ONE large gap on the far side: the whole ad pinned to the top with
+   a dead void below it. `centerAlongAxis()` now shifts the whole placed
+   block by a uniform offset so leftover room splits into an even top/bottom
+   (or left/right) margin instead — a plain translation, so the already-
+   validated non-overlap/in-bounds invariants are unaffected by construction,
+   and the strategy's OTHER axis (already sized per-row/column) needs no
+   centring of its own.
+
+All three verified live (chrome-devtools MCP) on `mobilePortrait` and
+`retailKiosk`: the CTA now visibly spans most of the ad's width instead of
+leaving a gap beside it, "DIOR" renders as legible text, and `retailKiosk`'s
+block sits vertically centred with even margins instead of pinned to the top.
+9 new tests cover all three fixes (`candidates.test.ts`); the Stress Lab still
+reports `failed = 0` (robustness settled at 82.5% — every degraded entry still
+"sparse but valid," no new failure category; correctly-sized elements are
+simply stricter about fitting the most extreme synthetic surfaces).
 
 ---
 
@@ -784,25 +832,29 @@ cross-check, not the scorer asserting about itself. Tiers:
 | metric | value |
 |---|---|
 | total | 200 |
-| passed | 177 |
-| degraded | 23 |
+| passed | 165 |
+| degraded | 35 |
 | **failed** | **0** |
-| robustness (passed / total) | **88.5%** |
+| robustness (passed / total) | **82.5%** |
 
-Repeated unseeded runs land in an **87–90%** "robustness" band and, in every
+Repeated unseeded runs land in an **80–85%** "robustness" band and, in every
 run, **0 failed**. This band moved from **49–54%** (pre-`contextFit`) to
 **62–68%** (`contextFit` added, §4) to **86–89%** (the minTapTarget-sizing bug
 fixed) to **88–91%** (`emergency-fit`, §4d, added) to **82–86%** (`adjacencyFit`,
-§4e, added — a quality-bar dip from re-weighting, not a regression) to the
-current **87–90%** once `compositionCohesion` (§4g) was added. That last move
-is not just a quality-bar shuffle: it fixed a real correctness-adjacent bug —
-`overlay-safe-margins`'s scattered-corners arrangement no longer wins on ANY
-of the 5 real sample surfaces (previously it won on all but `broadcastLowerThird`),
-which incidentally also raised the robustness number because the surfaces that
-now resolve to `vertical-stack`/`horizontal-split` keep more elements visible
-than the old winner did. The number that matters for correctness is
-`failed = 0`, confirmed unchanged after every phase: across 200 adversarial
-surfaces including `3840×2160` and `120×2000`, the hard-invariant guarantee
+§4e, added — a quality-bar dip from re-weighting, not a regression) to
+**87–90%** (`compositionCohesion`, §4g — not just a quality-bar shuffle: it
+fixed a real correctness-adjacent bug, `overlay-safe-margins`'s
+scattered-corners arrangement winning on 4 of the 5 real sample surfaces) to
+the current **80–85%** once the three placement bugs in §7.5 were fixed
+(`preferredSize.width` honoured, CTA width-growth allowed, cascading blocks
+centred). That last move is ALSO not a regression: correctly-sized elements
+(a 200px-preferred CTA instead of ~120-138px, a 96px logo instead of ~40px)
+are legitimately stricter about fitting the Stress Lab's most extreme
+synthetic surfaces (`320×50`, `100×600`) — every one of the now-more-numerous
+degraded entries is still categorized "sparse but valid," not a new failure
+mode. The number that matters for correctness is `failed = 0`, confirmed
+unchanged after every phase: across 200 adversarial surfaces including
+`3840×2160` and `120×2000`, the hard-invariant guarantee
 from §4 held every time. The robustness figure is the *quality* bar (score ≥
 70), not a correctness bar — see §10 for why that metric is soft.
 
