@@ -22,12 +22,14 @@ import {
 import type { ExperienceGraph } from "../core/graph";
 import type { AdElement } from "../core/spec";
 import type { ResolvedLayout } from "../core/resolver";
+import type { DecisionTrace } from "../core/trace";
 import { SurfaceStage } from "./SurfaceStage";
+import { LayoutDebugger } from "./LayoutDebugger";
 
 interface Resolved {
   surface: SurfaceProfile;
   layout: ResolvedLayout;
-  winningStrategy: string;
+  trace: DecisionTrace;
 }
 
 function parseViewingDistance(raw: string): ViewingDistance | undefined {
@@ -79,7 +81,7 @@ export function UnknownSurfaceInput({
       setResult({
         surface,
         layout: resolved.layout,
-        winningStrategy: resolved.trace.winningStrategy,
+        trace: resolved.trace,
       });
     } catch (err) {
       setResult(null);
@@ -179,13 +181,25 @@ export function UnknownSurfaceInput({
         <div data-testid="us-result">
           <p className="ale-meta">
             {result.surface.width}×{result.surface.height} · winning strategy{" "}
-            <span className="ale-chip">{result.winningStrategy}</span> ·{" "}
-            <span className="ale-num">
+            <span className="ale-chip">{result.trace.winningStrategy}</span> ·{" "}
+            <span className="ale-num" data-testid="us-visible-count">
               {result.layout.elements.filter((e) => e.visible).length}/
               {result.layout.elements.length}
             </span>{" "}
             elements visible
           </p>
+
+          {result.layout.elements.every((e) => !e.visible) && (
+            <p className="ale-error" data-testid="us-nothing-fits">
+              Nothing fits on this surface — not even the single highest-priority
+              element. {result.surface.width}×{result.surface.height} is too
+              small for this ad's declared minimum sizes; every strategy scored
+              0 and the pipeline fell back to <b>{result.trace.winningStrategy}</b>{" "}
+              arbitrarily (a tie among equally-empty candidates). See the
+              debugger below for the per-element reason.
+            </p>
+          )}
+
           <SurfaceStage
             surface={result.surface}
             elements={result.layout.elements}
@@ -193,6 +207,10 @@ export function UnknownSurfaceInput({
             maxWidth={640}
             maxHeight={520}
           />
+
+          <div style={{ maxWidth: 560, marginTop: 14 }}>
+            <LayoutDebugger trace={result.trace} />
+          </div>
         </div>
       )}
     </section>
