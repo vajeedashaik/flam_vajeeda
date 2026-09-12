@@ -829,7 +829,10 @@ body::before {
 }
 @keyframes ale-tv-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 .ale-tv-tag { color: #71717a; white-space: nowrap; }
-.ale-tv-screen { overflow: hidden; }
+/* display:flex here is load-bearing — DeviceFrame sets justifyContent inline
+   to CENTER a narrower-than-frame surface, so the dark background on either
+   side reads as a real pillarbox, not a rendering gap. */
+.ale-tv-screen { display: flex; overflow: hidden; background: #050507; }
 .ale-tv-bottombar {
   display: flex;
   align-items: center;
