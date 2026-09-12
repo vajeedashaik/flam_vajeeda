@@ -193,7 +193,7 @@ element sizes requested (§4, "Context-aware sizing") and which strategy wins
 
 ### Strategies actually implemented (`src/core/candidates.ts`)
 
-`generateCandidates()` **always** returns all four (≥ 3 required) so the scorer
+`generateCandidates()` **always** returns all five (≥ 3 required) so the scorer
 has a real choice:
 
 | strategy | geometry |
@@ -202,8 +202,9 @@ has a real choice:
 | `horizontal-split` | one row, elements left→right, each as tall as the box |
 | `grid` | row-major grid of `ceil(sqrt(n))` columns, each element clamped to its cell |
 | `overlay-safe-margins` | four elements anchored to the four corners (`tl, br, tr, bl`), each capped at half the box per axis so corners can't overlap; the two highest-priority elements land in **opposite** corners; a 5th element and beyond are dropped |
+| `emergency-fit` | same cascading vertical layout as `vertical-stack`, but `visibility:"always"` elements' `preferred`/`min` are unconditionally relaxed to a 24×16 floor before placement — see §4d |
 
-All four run through one shared engine, `placeElementsInOrder(requests, box,
+All five run through one shared engine, `placeElementsInOrder(requests, box,
 layoutFn, growAxes)`, so priority ordering and shrink/drop/grow logic live in
 exactly one place. Resolution order is canonical: `priority` ascending, then
 `id` ascending as a tie-break (`orderedRequests`).
@@ -299,6 +300,56 @@ if ((node.type === "text" || node.type === "button") && node.text !== undefined)
   };
 }
 ```
+
+### Emergency-fit: a floor under the "nothing fits" case (§4d)
+
+Extreme-edge-case testing (the Stress Lab's `100×600` to `320×50` range, and
+manually-entered surfaces like `40×40`) surfaced a real gap: on a surface
+smaller than an ad's declared `minSize` for its own must-keep elements, all
+four normal strategies hard-fail the moment the shrink cascade can't get a
+`visibility:"always"` element down to its `minSize` — every candidate scores
+`0`, and the resolver falls back to an arbitrary tie among equally-empty
+layouts. The user-visible result was literally nothing on screen: "0/5
+visible" with no ad rendered at all, regardless of how small the surface was
+below the ad's stated minimums.
+
+`emergencyFit()` in `candidates.ts` is the fix — a 5th candidate, always
+generated, that:
+
+1. Maps every `visibility:"always"` element's `preferred` and `min` down to
+   `EMERGENCY_MIN_SIZE = { width: 24, height: 16 }` — **unconditionally**,
+   regardless of whether the surface actually needs the relaxation. This is
+   deliberate, not an oversight: the relaxation only has to be safe, not
+   conditional, because normal scoring already penalizes it correctly (next
+   point).
+2. Runs the exact same `placeElementsInOrder` cascade as `vertical-stack`
+   (same `growAxes: { width: true, height: false }`), so it inherits identical
+   shrink/grow/drop and non-overlap/in-bounds guarantees — no new placement
+   logic, no new invariant to prove.
+3. Wins only when it has to. `constraintViolationsScore` already penalizes an
+   element forced below its declared `minSize`, so on any surface where a
+   normal strategy can seat every element at its real minimum, that strategy
+   scores higher and wins the tie-break — `emergency-fit` scores positive but
+   loses. It only wins the 200-candidate stress sweep and the `40×40` /
+   `100×600` manual tests when the other four have all hard-failed to `0`,
+   because relaxed-but-visible always beats "nothing rendered."
+
+This is intentionally a **floor, not a smarter layout**: at `24×16`, the
+headline text is unreadable and the CTA is far below any real tap target. The
+honest framing is "the ad renders something instead of nothing," not "the ad
+looks good at this size" — no surface this small should ship in production
+regardless of what the resolver does. Verified live (Playwright): a manually
+entered `100×600` surface goes from a would-be "nothing fits" case to
+`emergency-fit` winning with 5/5 elements visible; `40×40` keeps the two
+`visibility:"always"` elements (headline, CTA) visible and drops the other
+three cleanly (with debugger notes explaining why), rather than dropping
+everything. Six new tests in `candidates.test.ts` cover: normal strategies
+hard-failing on a too-narrow/too-short surface, `emergency-fit` rescuing both
+always-elements in each case, `resolveLayout` picking it with a positive
+score, no regression on spacious surfaces (both strategies keep everything
+visible; `emergency-fit`'s headline is narrower and it never wins the
+tie-break there), and invariant safety (no overlap/out-of-bounds) under the
+relaxed floor.
 
 ### Context-aware sizing (§4.3-context)
 
@@ -609,22 +660,22 @@ cross-check, not the scorer asserting about itself. Tiers:
 | metric | value |
 |---|---|
 | total | 200 |
-| passed | 175 |
-| degraded | 25 |
+| passed | 180 |
+| degraded | 20 |
 | **failed** | **0** |
-| robustness (passed / total) | **87.5%** |
+| robustness (passed / total) | **90.0%** |
 
-Repeated unseeded runs land in an **86–89%** "robustness" band and, in every
+Repeated unseeded runs land in an **88–91%** "robustness" band and, in every
 run, **0 failed**. This band moved from **49–54%** (pre-`contextFit`) to
-**62–68%** (`contextFit` added, §4) to the current **86–89%** once the
-minTapTarget-sizing bug above was fixed — three real, measured improvements,
-not re-tuned thresholds. The number that matters for correctness is
-`failed = 0`: across 200 adversarial surfaces including `3840×2160` and
-`120×2000`, the hard-invariant guarantee from §4 held every time. The
-robustness figure is the *quality* bar (score ≥ 70), not a correctness bar —
-see §10 for why that metric is soft.
+**62–68%** (`contextFit` added, §4) to **86–89%** (the minTapTarget-sizing bug
+fixed) to the current **88–91%** once `emergency-fit` (§4d) was added — four
+real, measured improvements, not re-tuned thresholds. The number that matters
+for correctness is `failed = 0`: across 200 adversarial surfaces including
+`3840×2160` and `120×2000`, the hard-invariant guarantee from §4 held every
+time. The robustness figure is the *quality* bar (score ≥ 70), not a
+correctness bar — see §10 for why that metric is soft.
 
-### Conclusion: what the ~25 degraded entries actually are
+### Conclusion: what the ~20 degraded entries actually are
 
 Counting degraded entries without asking why is exactly the kind of number
 this project's whole philosophy argues against — so `categorizeStressDetail()`
@@ -632,22 +683,36 @@ this project's whole philosophy argues against — so `categorizeStressDetail()`
 root cause, computed purely from data `runStressTest` already produces
 (`visibleCount`, `overallScore`, `outcome` — never a hardcoded element id, same
 rule every other file in this pipeline follows). The Stress Lab UI renders
-this as a **Conclusion** panel above the raw entry list. A representative run:
+this as a **Conclusion** panel above the raw entry list.
+
+Before `emergency-fit` existed, a representative run split roughly 65%
+"nothing fits at all" (`visibleCount === 0` — not even the top-priority
+element could be placed by any strategy) / 30% "a must-keep element was
+dropped" (`visibleCount > 0 && overallScore === 0` — something fit but a
+`visibility:"always"` element didn't) / 5% "valid, but a real quality
+ceiling." Both of the first two categories are exactly the failure mode the
+user flagged — the ad disappears entirely, or drops something the spec marked
+non-negotiable — and both are surface-size problems `emergency-fit` (§4d) was
+built to catch: it relaxes always-visible elements to a 24×16 floor and wins
+whenever the other four strategies have all hard-failed to `0`, which is
+precisely the condition that produced those two categories.
+
+A representative run after adding it:
 
 | category | share | what it means |
 |---|---|---|
-| **nothing fits at all** (`visibleCount === 0`) | ~65% of degraded | Not even the single highest-priority element could be placed by *any* strategy — some axis of the surface is smaller than the ad's own declared minimum (e.g. width below the headline's `minSize.width: 180`). Every element cascades to dropped. Scoring this `0` is correct: there is no valid layout to prefer over another. |
-| **a must-keep element was dropped** (`visibleCount > 0 && overallScore === 0`) | ~30% of degraded | At least one element fit, but not enough room remained to also keep every `visibility:"always"` element (headline, cta) — the resolver refuses to call that valid rather than silently shipping an ad missing something the spec marked non-negotiable. |
-| **valid, but a real quality ceiling** (`0 < overallScore < 70`) | ~5% of degraded | A genuine, non-overlapping, in-bounds layout with every must-keep element intact — just sparse (e.g. `200×200` keeping 2 of 5). The score is telling the truth about a constrained surface, not failing to find a better answer. |
+| **nothing fits at all** (`visibleCount === 0`) | **0% of degraded** | Eliminated by `emergency-fit` — there is now always a strategy that can seat at least the always-visible elements at a 24×16 floor, so this category no longer occurs in practice. |
+| **a must-keep element was dropped** (`visibleCount > 0 && overallScore === 0`) | **0% of degraded** | Same fix: `emergency-fit` never drops a `visibility:"always"` element, so a normal strategy failing to keep one no longer means the surface has no valid layout at all — `emergency-fit` supplies one. |
+| **valid, but a real quality ceiling** (`0 < overallScore < 70`) | **100% of degraded** | A genuine, non-overlapping, in-bounds layout with every must-keep element intact — just sparse (e.g. `320×50` keeping 2 of 5 at `emergency-fit`'s floor size, or `100×600`/`120×2000` keeping all 5 but shrunk hard). The score is telling the truth about a constrained surface, not failing to find a better answer, and it is no longer a case of the ad vanishing. |
 
-The headline takeaway: **every degraded entry is one of these three honest
-outcomes, never a resolver bug** — categorized directly from a real 200-surface
-run, not asserted. `invariant-violation` (an element that actually overlapped
-or clipped, which would indicate a real bug) never appears — consistent with
-`failed = 0` holding every run. `stress-lab.test.ts` asserts the same
-partition holds structurally: every degraded/failed entry falls into exactly
-one of the three honest categories, and the invariant-violation bucket stays
-empty.
+The headline takeaway: **the two categories that meant "the ad shows nothing"
+are now empty — every remaining degraded entry is a genuinely rendered, sparse
+layout**, categorized directly from a real 200-surface run, not asserted.
+`invariant-violation` (an element that actually overlapped or clipped, which
+would indicate a real bug) never appears — consistent with `failed = 0`
+holding every run. `stress-lab.test.ts` asserts the same partition holds
+structurally: every degraded/failed entry falls into exactly one of the three
+honest categories, and the invariant-violation bucket stays empty.
 
 The unit test `stress-lab.test.ts` asserts `generateRandomSurfaces(50)` never
 throws and `runStressTest` on 200 surfaces produces **zero** "failed" entries.
@@ -699,15 +764,20 @@ produces a layout with zero overlaps / out-of-bounds **and**
   (spacing, thumb-zone placement) — `contextFit`'s attention/far bonuses reward
   a strategy for naturally dropping to fewer elements, but nothing forces that
   outcome directly.
-* **Candidate generation is still 4 fixed strategies, not a search.** No
-  parameter sweep (gutters, alignment, orientation), no packing/bin-fit, no
-  iterative refinement of the winner. `contextFit` picks the best of four
-  context-suited candidates; it doesn't invent a fifth. That ceiling is the
-  remaining "degraded" band in the Stress Lab (§8).
+* **Candidate generation is still 4 context-suited strategies plus one fixed
+  fallback, not a search.** No parameter sweep (gutters, alignment,
+  orientation), no packing/bin-fit, no iterative refinement of the winner.
+  `contextFit` picks the best of the four normal candidates; the 5th,
+  `emergency-fit` (§4d), only ever activates once all four have hard-failed —
+  it raises the floor from "nothing renders" to "something sparse renders," it
+  doesn't raise the ceiling on already-valid layouts. That ceiling is the
+  remaining "degraded" band in the Stress Lab (§8), which — since
+  `emergency-fit` was added — is now 100% "valid, but sparse" rather than
+  partly "nothing fits."
 * **The "robustness" metric conflates quality with correctness.** `passed`
   requires `score ≥ 70`; true robustness (no hard invariant ever broken) is
   effectively 100% across every run regardless of the quality threshold. The
-  ~87% headline number still understates correctness (which is ~100%) — the
+  ~90% headline number still understates correctness (which is ~100%) — the
   gap matters more on a surface where the quality bar is failed, not just
   crossed. I'd split the metric into "invariant-safe %" (the real guarantee)
   and "quality %", and the Stress Lab's Conclusion panel (§8) already moves in
@@ -757,21 +827,54 @@ doesn't replace it: `<DeviceFrame>` renders exactly one `<SurfaceStage>` as a
 child, so every debug-overlay / device-frame combination is really the same
 `ResolvedLayout → pixels` path underneath.
 
-**Bug found by inspection, now fixed: the TV chassis had no notion of "a TV is
-wider than it is tall."** `.ale-tv-frame` had no explicit width, so it
-shrink-wrapped to whatever `SurfaceStage` rendered — forcing "TV" onto a
-portrait surface produced a tall, narrow black column with the bottom
-bezel/stand pushed out of view, nothing that reads as a television. Fixed with
-`MIN_TV_ASPECT = 16/9`: `DeviceFrame` computes the same fit-scale
-`SurfaceStage` will use, then sets the chassis width to
-`Math.max(scaledWidth, scaledHeight × 16/9)`. When the real content is
-narrower than that floor, it's centred inside a wider `.ale-tv-screen` with a
-dark background — a genuine pillarbox (letterbox bars either side), exactly
-how a real TV displays a non-native-aspect source, rather than distorting the
-chassis into a shape no TV has ever had. The top bar, screen, and bottom bezel
-all share the one computed width via CSS's default `align-items: stretch` on
-a column flex container, so they stay visually consistent without each
-needing its own width logic.
+**Bug found by inspection, fixed twice: the TV chassis had no notion of "a TV
+is wider than it is tall," then a first fix over-corrected.** `.ale-tv-frame`
+originally had no explicit width, so it shrink-wrapped to whatever
+`SurfaceStage` rendered — forcing "TV" onto a portrait surface produced a
+tall, narrow black column with the bottom bezel/stand pushed out of view,
+nothing that reads as a television. The first fix (`MIN_TV_ASPECT = 16/9`,
+chassis width = `Math.max(scaledWidth, scaledHeight × 16/9)`) derived the
+chassis size from `SurfaceStage`'s own fit-scale — but that scale is driven by
+the surface's own (often tall) height, so a portrait phone surface at
+`maxHeight 620` scales to `scaledHeight ≈ 620`, and `620 × 16/9 ≈ 1100px` of
+chassis width — far beyond the caller's actual layout budget, producing a
+chassis wider than the page itself and still reading as broken, just
+differently.
+
+The current fix bounds the **whole chassis**, not just the screen, to the
+caller's `maxWidth × maxHeight` budget, in two steps: first fit a landscape
+box — at least `MIN_TV_ASPECT = 1.35` (deliberately more modest than 16:9;
+see the code comment on why forcing a stricter ratio only produces more
+pillarboxing for the same content, not more accuracy), wider still if the
+surface itself is wider — inside the original budget, reserving
+`TV_CHROME_HEIGHT = 46`px for the top/bottom bars; then fit the real surface
+inside *that* box (`contentScale = Math.min(1, chassisW / surface.width,
+screenH / surface.height)`). The chassis never exceeds what was asked for;
+only the screen-vs-pillarbox split inside it varies with content. On the
+common case — a naturally wide surface like the `1920×320` broadcast lower
+third, auto-detected as TV — the fitted box already matches the content's own
+aspect ratio, so `isPillarboxed` is `false` and the screen shows edge-to-edge
+content with no dark bars at all. Only the deliberately-mismatched case (TV
+manually forced onto a portrait phone surface) still pillarboxes, now bounded
+and explicitly labeled in the chassis tag (`"390×844 pillarboxed — portrait
+content on a landscape TV"`) rather than looking like an unbounded rendering
+bug. Verified live in both configurations (Playwright): auto-TV on the
+broadcast surface renders full-width with zero pillarbox; TV forced onto
+`390×844` renders a bounded chassis (774×620, within the 900×620 budget) with
+correctly centred, labeled letterboxing.
+
+**Bug found by inspection, now fixed: every single-preview view left a large,
+lopsided gap on the right at desktop widths.** `SurfaceStage`/`DeviceFrame`
+size themselves to their own (often narrow) content width, and every view
+that renders exactly one preview (Single surface, the degradation slider, both
+sides of Naive vs Smart and Self-Healing, Unknown surface) placed that single
+narrow element inside a full-width panel with no centering — so it sat flush
+left, and the rest of the panel read as accidental dead space rather than
+intentional layout. Fixed with one CSS rule, `.ale-stage-wrap { display: flex;
+justify-content: center; }`, wrapped around each of those single-preview call
+sites (never around the Side-by-side grid, which legitimately uses the full
+width for multiple panels). Purely cosmetic — no resolver or scoring file
+touched.
 
 **`DebugOverlay.tsx`** draws a dashed safe-area outline plus a colored,
 zone-tinted, labeled box per placed element directly inside `SurfaceStage`'s
