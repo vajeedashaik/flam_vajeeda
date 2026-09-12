@@ -101,6 +101,17 @@ export class AdSpecValidationError extends Error {
 }
 
 /**
+ * Formats a value for an error message. `JSON.stringify(NaN)` returns the
+ * STRING `"null"` (JSON has no NaN) — misleading in a validation message when
+ * a caller got here via `Number(someBadInput)`: "invalid priority null" reads
+ * as "you gave me literal null", not "that wasn't a number at all".
+ */
+function describeInvalid(value: unknown): string {
+  if (typeof value === "number" && Number.isNaN(value)) return "NaN";
+  return JSON.stringify(value);
+}
+
+/**
  * Construct a validated {@link AdSpec}.
  *
  * Validates at construction time:
@@ -159,7 +170,7 @@ export function defineAd(config: AdConfig): AdSpec {
       element.priority <= 0
     ) {
       throw new AdSpecValidationError(
-        `Ad spec "${adId}", element "${elementId}": invalid priority ${JSON.stringify(
+        `Ad spec "${adId}", element "${elementId}": invalid priority ${describeInvalid(
           element.priority,
         )}. Priority must be a positive number (lower = more critical).`,
       );
