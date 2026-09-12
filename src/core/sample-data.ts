@@ -50,43 +50,57 @@ export const productAd: AdSpec = defineAd({
       preferredSize: { width: 200, height: 56 },
     },
     {
-      id: "product-image",
-      type: "image",
-      role: "hero",
-      priority: 3,
-      importance: "should-survive",
-      interaction: "static",
-      visibility: "degradable",
-      src: "/products/dior-backstage-rosy-glow.png",
-      minSize: { width: 96, height: 96 },
-      preferredSize: { width: 480, height: 480 },
-    },
-    {
+      // §7.7: promoted to `visibility: "always"`, same guarantee headline/cta
+      // already had — the ad's "4 infos" (headline, cta, price, logo) must
+      // all survive on every surface, in some form, even if only at
+      // emergency-fit's tiny floor size. priority also moves 4→3 (still
+      // below headline/cta, but now ABOVE product-image) so it is never the
+      // element sacrificed to make room for the photo.
       id: "price",
       type: "text",
       role: "secondary",
-      priority: 4,
-      importance: "should-survive",
+      priority: 3,
+      importance: "critical",
       interaction: "static",
-      visibility: "degradable",
+      visibility: "always",
       text: "₹2,900 · Shade 012 Rosewood",
       fontSize: 15,
       minSize: { width: 64, height: 24 },
       preferredSize: { width: 140, height: 48 },
     },
     {
+      // §7.7: same promotion as price — the brand mark is one of the "4
+      // infos", not a decoration to drop first. priority moves 5→4.
       id: "logo",
       type: "text",
       role: "branding",
-      priority: 5,
-      importance: "nice-to-have",
+      priority: 4,
+      importance: "critical",
       interaction: "static",
-      visibility: "decorative-only",
+      visibility: "always",
       text: "DIOR",
       fontSize: 18,
       minSize: { width: 24, height: 24 },
       preferredSize: { width: 96, height: 32 },
       brandRules: { locked: true, minSize: { width: 24, height: 24 } },
+    },
+    {
+      // §7.7: priority demoted 3→5 (now the LOWEST) — the product photo is
+      // the one visual asset allowed to shrink hardest or drop first when a
+      // surface can't fit everything, precisely so the four TEXT/info
+      // elements (headline, cta, price, logo) never have to give way to it.
+      // Still `visibility: "degradable"`, unchanged — this is the intentional
+      // trade-off, not an oversight.
+      id: "product-image",
+      type: "image",
+      role: "hero",
+      priority: 5,
+      importance: "should-survive",
+      interaction: "static",
+      visibility: "degradable",
+      src: "/products/dior-backstage-rosy-glow.png",
+      minSize: { width: 96, height: 96 },
+      preferredSize: { width: 480, height: 480 },
     },
   ],
 });
