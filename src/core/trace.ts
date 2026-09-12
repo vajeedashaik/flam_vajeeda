@@ -56,7 +56,7 @@ export function buildTrace(
   };
 }
 
-/** The seven weighted sub-scores, in the order the UI lists them. */
+/** The eight weighted sub-scores, in the order the UI lists them. */
 const SUB_SCORES: {
   key: keyof Omit<ScoreBreakdown, "overall">;
   /** Plain-language name of the sub-score. */
@@ -98,6 +98,11 @@ const SUB_SCORES: {
     key: "adjacencyFit",
     label: "element grouping",
     cause: "a graph-linked pair (e.g. price and its call-to-action) likely ended up far apart, with dead space between them",
+  },
+  {
+    key: "compositionCohesion",
+    label: "ad cohesion",
+    cause: "its elements likely read as scattered separate pieces rather than one connected ad, with a large empty gap somewhere in the composition",
   },
 ];
 
