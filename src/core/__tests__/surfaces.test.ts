@@ -79,4 +79,18 @@ describe("defineSurface", () => {
       defineSurface({ ...validConfig(), viewingDistance: 0 }),
     ).toThrow(/invalid viewingDistance 0/);
   });
+
+  it("throws a clear 'NaN' message for a width that came from Number(badInput) — not the misleading 'null' JSON.stringify(NaN) produces", () => {
+    // The exact shape a live form field takes when a user types non-numeric
+    // text: `Number("abc")` is NaN, which JSON.stringify renders as "null".
+    expect(() =>
+      defineSurface({ ...validConfig(), width: Number("abc") }),
+    ).toThrow(/invalid width NaN\. Width must be a positive number/);
+  });
+
+  it("throws a clear 'NaN' message for a NaN height", () => {
+    expect(() =>
+      defineSurface({ ...validConfig(), height: Number.NaN }),
+    ).toThrow(/invalid height NaN\. Height must be a positive number/);
+  });
 });
