@@ -17,7 +17,7 @@
  * unchanged.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { productAd, surfaceProfiles } from "./core/sample-data";
 import { defineSurface, type SurfaceProfile } from "./core/surfaces";
 import { buildGraph } from "./core/graph";
@@ -65,18 +65,6 @@ const MODES: { key: Mode; label: string }[] = [
 
 const VIEWPORT_MAX = { width: 900, height: 620 };
 
-type ThemeChoice = "system" | "light" | "dark";
-
-function readTheme(): ThemeChoice {
-  try {
-    const t = localStorage.getItem("ale-theme");
-    if (t === "light" || t === "dark") return t;
-  } catch {
-    /* ignore */
-  }
-  return "system";
-}
-
 const DEVICE_OPTIONS: { key: DeviceType; label: string }[] = [
   { key: "auto", label: "Auto" },
   { key: "clean", label: "Clean" },
@@ -89,29 +77,8 @@ export default function App(): JSX.Element {
   const [selectedKey, setSelectedKey] = useState<string>(BASE_OPTIONS[0]!.key);
   /** Surfaces loaded from the Stress Lab / other views, appended to the picker. */
   const [extraSurfaces, setExtraSurfaces] = useState<SurfaceProfile[]>([]);
-  const [theme, setTheme] = useState<ThemeChoice>(readTheme);
   const [deviceType, setDeviceType] = useState<DeviceType>("auto");
   const [showDebug, setShowDebug] = useState(false);
-
-  useEffect(() => {
-    const root = document.documentElement;
-    try {
-      if (theme === "system") {
-        root.removeAttribute("data-theme");
-        localStorage.removeItem("ale-theme");
-      } else {
-        root.setAttribute("data-theme", theme);
-        localStorage.setItem("ale-theme", theme);
-      }
-    } catch {
-      if (theme === "system") root.removeAttribute("data-theme");
-      else root.setAttribute("data-theme", theme);
-    }
-  }, [theme]);
-
-  function cycleTheme(): void {
-    setTheme((t) => (t === "system" ? "light" : t === "light" ? "dark" : "system"));
-  }
 
   const graph = useMemo(() => buildGraph(productAd), []);
   const specById = useMemo(
@@ -150,7 +117,6 @@ export default function App(): JSX.Element {
   }
 
   const visible = layout.elements.filter((e) => e.visible);
-  const themeIcon = theme === "system" ? "🌗" : theme === "light" ? "☀️" : "🌙";
 
   return (
     <div className="ale-shell">
@@ -178,16 +144,6 @@ export default function App(): JSX.Element {
             </button>
           ))}
         </div>
-        <button
-          type="button"
-          className="ale-icon-btn"
-          data-testid="theme-toggle"
-          aria-label={`Theme: ${theme}. Click to change.`}
-          title={`Theme: ${theme}`}
-          onClick={cycleTheme}
-        >
-          {themeIcon}
-        </button>
       </nav>
 
       {mode === "single" && (
