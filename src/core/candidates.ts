@@ -40,6 +40,18 @@ const FAR_VIEWING_TEXT_SCALE = 1.3;
  */
 const TOUCH_TARGET_SCALE = 1.15;
 
+/**
+ * "Grow into slack" (see ARCHITECTURE.md §4c) — an element on an axis the
+ * strategy marks growable may size up beyond its preferred size when its slot
+ * offers more room, instead of only ever shrinking toward it. Capped at a
+ * fixed multiple of PREFERRED (not "fill the whole slot") so a small CTA on a
+ * huge broadcast surface becomes a nicely-sized button, not an edge-to-edge
+ * bar — and relative to each element's own preferred, so two elements with
+ * different preferred sizes (e.g. far-viewing vs. near) still end up
+ * different sizes rather than both maxing out at the same slot ceiling.
+ */
+const GROWTH_CAP_FACTOR = 1.4;
+
 export type CandidateStrategy =
   | "vertical-stack"
   | "horizontal-split"
@@ -108,6 +120,8 @@ interface PlacementRequest {
   priority: number;
   preferred: SizeConstraint;
   min: SizeConstraint;
+  /** brandRules.locked — never resized away from `preferred`, growth included. */
+  locked: boolean;
 }
 
 function toRequest(node: GraphNode, context: Context): PlacementRequest {
@@ -160,6 +174,7 @@ function toRequest(node: GraphNode, context: Context): PlacementRequest {
     priority: node.priority,
     preferred,
     min,
+    locked: node.brandRules?.locked === true,
   };
 }
 
@@ -217,22 +232,53 @@ function shrinkNote(r: PlacementRequest, w: number, h: number): string {
   );
 }
 
+function growNote(r: PlacementRequest, w: number, h: number): string {
+  const before = r.preferred.width * r.preferred.height;
+  const after = w * h;
+  const pct = before > 0 ? Math.round((after / before - 1) * 100) : 0;
+  return (
+    `${r.id}: wanted ${r.preferred.width}×${r.preferred.height}, ` +
+    `grew to ${Math.round(w)}×${Math.round(h)} (+${pct}%) — extra room available`
+  );
+}
+
+/**
+ * One axis (width or height) of the final placed size. Shrink-only unless
+ * `canGrow` — even then, growth never exceeds the slot's own ceiling
+ * (`slotMax`), so it can only ever use space the strategy already decided is
+ * safely this element's own (never a sibling's).
+ */
+function sizeAxis(preferred: number, slotMax: number, canGrow: boolean): number {
+  if (!canGrow) return Math.min(preferred, slotMax);
+  return Math.min(slotMax, preferred * GROWTH_CAP_FACTOR);
+}
+
+/** Which axes a strategy allows an element to grow beyond its preferred size on. */
+export interface GrowAxes {
+  width: boolean;
+  height: boolean;
+}
+const NO_GROWTH: GrowAxes = { width: false, height: false };
+
 /**
  * Shared placement engine used by ALL four strategies (so the priority ordering
  * and shrink/drop logic from Phase 2's resolver lives in exactly one place).
  *
- * For each element in priority order it asks `layoutFn` for a slot, shrinks the
- * element to fit that slot (never below its declared min), and drops it —
- * `visible: false`, then cascades to every lower-priority element — when it
- * cannot fit or the strategy offers no slot. It also re-checks the two hard
- * invariants (fully in-bounds, non-overlapping) and drops anything that would
- * break them, so every candidate produced here is guaranteed clip-free and
- * overlap-free no matter what a strategy function does.
+ * For each element in priority order it asks `layoutFn` for a slot, sizes the
+ * element to that slot (never below its declared min; grown above `preferred`
+ * only on axes `growAxes` marks growable, capped by `GROWTH_CAP_FACTOR` — see
+ * `sizeAxis`), and drops it — `visible: false`, then cascades to every
+ * lower-priority element — when it cannot fit or the strategy offers no slot.
+ * It also re-checks the two hard invariants (fully in-bounds, non-overlapping)
+ * and drops anything that would break them, so every candidate produced here
+ * is guaranteed clip-free and overlap-free no matter what a strategy function
+ * does.
  */
 export function placeElementsInOrder(
   requests: PlacementRequest[],
   available: Box,
   layoutFn: StrategyLayoutFn,
+  growAxes: GrowAxes = NO_GROWTH,
 ): PlacementOutcome {
   const placed: ResolvedElement[] = [];
   const notes: string[] = [];
@@ -263,8 +309,9 @@ export function placeElementsInOrder(
       continue;
     }
 
-    const width = Math.min(request.preferred.width, slot.maxWidth);
-    const height = Math.min(request.preferred.height, slot.maxHeight);
+    const canGrow = !request.locked;
+    const width = sizeAxis(request.preferred.width, slot.maxWidth, growAxes.width && canGrow);
+    const height = sizeAxis(request.preferred.height, slot.maxHeight, growAxes.height && canGrow);
     const el: ResolvedElement = {
       id: request.id,
       x: slot.x,
@@ -290,7 +337,9 @@ export function placeElementsInOrder(
       continue;
     }
 
-    if (
+    if (width > request.preferred.width + EPS || height > request.preferred.height + EPS) {
+      notes.push(growNote(request, width, height));
+    } else if (
       width < request.preferred.width - EPS ||
       height < request.preferred.height - EPS
     ) {
@@ -306,44 +355,74 @@ export function placeElementsInOrder(
 // Each is pure geometry over `box` (the surface's usable region) and the
 // per-element requests. None of them looks at a surface id or an element id.
 
-/** One column, elements stacked top→bottom, each as wide as the box allows. */
+/**
+ * One column, elements stacked top→bottom, each as wide as the box allows.
+ * WIDTH is a free axis here — every element sees the same full `box.width`
+ * regardless of what siblings above/below it did, so growing it can never
+ * eat into another element's space (only HEIGHT is the cascading, cursor-based
+ * axis, so only height stays shrink-only).
+ */
 function verticalStack(requests: PlacementRequest[], box: Box): PlacementOutcome {
-  return placeElementsInOrder(requests, box, ({ placed }) => {
-    const cursorY = placed.reduce((maxY, e) => Math.max(maxY, e.y + e.height), box.y);
-    const remaining = box.y + box.height - cursorY;
-    if (remaining <= 0) return null;
-    return { x: box.x, y: cursorY, maxWidth: box.width, maxHeight: remaining };
-  });
+  return placeElementsInOrder(
+    requests,
+    box,
+    ({ placed }) => {
+      const cursorY = placed.reduce((maxY, e) => Math.max(maxY, e.y + e.height), box.y);
+      const remaining = box.y + box.height - cursorY;
+      if (remaining <= 0) return null;
+      return { x: box.x, y: cursorY, maxWidth: box.width, maxHeight: remaining };
+    },
+    { width: true, height: false },
+  );
 }
 
-/** One row, elements placed left→right, each as tall as the box allows. */
+/**
+ * One row, elements placed left→right, each as tall as the box allows.
+ * Mirror of verticalStack: HEIGHT is the free axis (every element sees the
+ * full `box.height`), WIDTH is the cascading cursor-based axis and stays
+ * shrink-only.
+ */
 function horizontalSplit(requests: PlacementRequest[], box: Box): PlacementOutcome {
-  return placeElementsInOrder(requests, box, ({ placed }) => {
-    const cursorX = placed.reduce((maxX, e) => Math.max(maxX, e.x + e.width), box.x);
-    const remaining = box.x + box.width - cursorX;
-    if (remaining <= 0) return null;
-    return { x: cursorX, y: box.y, maxWidth: remaining, maxHeight: box.height };
-  });
+  return placeElementsInOrder(
+    requests,
+    box,
+    ({ placed }) => {
+      const cursorX = placed.reduce((maxX, e) => Math.max(maxX, e.x + e.width), box.x);
+      const remaining = box.x + box.width - cursorX;
+      if (remaining <= 0) return null;
+      return { x: cursorX, y: box.y, maxWidth: remaining, maxHeight: box.height };
+    },
+    { width: false, height: true },
+  );
 }
 
-/** Row-major grid of ceil(sqrt(n)) columns; each element clamped to its cell. */
+/**
+ * Row-major grid of ceil(sqrt(n)) columns; each element clamped to its cell.
+ * Cell geometry is fixed by (row, col) alone — never by any other element's
+ * actual placed size — so BOTH axes are free to grow here.
+ */
 function grid(requests: PlacementRequest[], box: Box): PlacementOutcome {
   const n = Math.max(1, requests.length);
   const cols = Math.max(1, Math.ceil(Math.sqrt(n)));
   const rows = Math.max(1, Math.ceil(n / cols));
   const cellW = box.width / cols;
   const cellH = box.height / rows;
-  return placeElementsInOrder(requests, box, ({ order }) => {
-    const col = order % cols;
-    const row = Math.floor(order / cols);
-    if (row >= rows) return null;
-    return {
-      x: box.x + col * cellW,
-      y: box.y + row * cellH,
-      maxWidth: cellW,
-      maxHeight: cellH,
-    };
-  });
+  return placeElementsInOrder(
+    requests,
+    box,
+    ({ order }) => {
+      const col = order % cols;
+      const row = Math.floor(order / cols);
+      if (row >= rows) return null;
+      return {
+        x: box.x + col * cellW,
+        y: box.y + row * cellH,
+        maxWidth: cellW,
+        maxHeight: cellH,
+      };
+    },
+    { width: true, height: true },
+  );
 }
 
 /**
@@ -352,6 +431,13 @@ function grid(requests: PlacementRequest[], box: Box): PlacementOutcome {
  * overlap). The two highest-priority elements land in OPPOSITE corners — the
  * maximum-separation arrangement, structurally unlike the grid's row-major
  * fill. A fifth element and beyond are dropped.
+ *
+ * Deliberately opts OUT of growth (no growAxes passed → NO_GROWTH): a
+ * right/bottom-anchored corner's OWN position formula (`box.width - w`)
+ * depends on its OWN final width/height, so growing width/height here would
+ * also have to re-derive x/y from the grown size — solvable, but not worth
+ * the extra coupling for a strategy whose whole point is "hug the margin,"
+ * not "use more space."
  */
 function overlaySafeMargins(
   requests: PlacementRequest[],
