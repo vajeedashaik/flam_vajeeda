@@ -31,7 +31,7 @@ Requires Node 18+.
 ```bash
 npm install       # install dependencies
 npm run dev       # start the Vite dev server (http://localhost:5173)
-npm run test      # run the full Vitest suite (93 tests)
+npm run test      # run the full Vitest suite (98 tests)
 npm run build     # type-check (tsc --noEmit) + production build to dist/
 npm run preview   # serve the production build locally (http://localhost:4173)
 ```
@@ -91,7 +91,13 @@ build) and open the page. A top nav bar switches between views:
   used by every built-in surface (so Phase 1 validation runs for real) and
   resolves through the exact same pipeline — no new code path. Enter an invalid
   combination (touchOnly with no minTapTarget) and the real validation error is
-  shown verbatim, not swallowed.
+  shown verbatim, not swallowed — including a genuinely non-numeric value
+  (e.g. leaving width as text): the message names the value `NaN`, not the
+  misleading `null` that `JSON.stringify(NaN)` used to produce. Enter a
+  surface too small for even the top-priority element (try `10000×20`) and
+  the view now explains it plainly — a callout naming the fallback, plus the
+  same Layout Debugger panel used everywhere else, listing exactly why each
+  element was dropped — instead of a bare "0/5 visible" with no context.
 
 ---
 
@@ -120,7 +126,7 @@ feature numbers (`§4.x`).
 | Layout Counterfactuals panel | Every candidate + score; click a loser for a generated sentence naming the sub-score gap (`explainLoss`) | Code quality (10%); §4.7b |
 | Layout Health Check panel | Pass/warn/fail checklist derived from the same 6 sub-scores | Code quality (10%); Example application (10%); §4.7c |
 | Side-by-side multi-surface view | All 5 surfaces resolved and rendered at once in device-style frames | Layout correctness across surfaces (25%); §4.16 |
-| Stress Lab | 200 randomized surfaces incl. extremes; tiered pass/degraded/failed; **0 failed every run**; ~65% robustness | Layout correctness across surfaces (25%); §4.10 |
+| Stress Lab | 200 randomized surfaces incl. extremes; tiered pass/degraded/failed; **0 failed every run**; ~87% robustness | Layout correctness across surfaces (25%); §4.10 |
 | Self-healing demo | Recovers from long text + broken images + tiny surface + translated copy simultaneously | Layout correctness (25%); §4.13; official bonus "text-measurement-aware layout" |
 | Real text measurement (`text-measure.ts`) | Canvas `measureText()` for the true rendered width of long / translated strings; node fallback preserves ordering | Constraint resolution algorithm (35%); official bonus "text-measurement-aware layout"; §4.13 / §4.17 |
 | Naive-vs-smart comparison | The real output beside a deliberately dumb uniform-scaling resolver | Example application (10%); §4.19 (proves it is not "uniform scaling passed off as adaptation") |
@@ -146,10 +152,14 @@ Real, specific to what was built (more technical depth in
   `contextFit` picks the best-suited of four; it doesn't invent a fifth. On
   some mid-size surfaces the best of four is only adequate — that is the
   remaining "degraded" band in the Stress Lab.
-- **The Stress Lab "robustness" number (~65%) is a quality bar, not a
+- **The Stress Lab "robustness" number (~87%) is a quality bar, not a
   correctness bar.** "passed" means score ≥ 70. Hard-invariant safety (no
   overlap / clip / dropped-always, ever) held on 100% of surfaces in every run;
-  "failed" is always 0. The headline percentage understates correctness.
+  "failed" is always 0. The headline percentage understates correctness, and
+  the remaining ~13% degraded band is now almost entirely surfaces too small
+  for any real content (`320×50`, `100×600`, …) — see ARCHITECTURE.md §4,
+  "Context-aware sizing", for a minTapTarget-sizing bug found via
+  extreme-edge-case testing that moved this number from ~65% to ~87%.
 - **Text measurement uses the Canvas `measureText()` API**, which differs
   slightly from the browser's final text layout (kerning, font fallback,
   wrapping). In the Node test environment there is no canvas, so a linear
@@ -222,7 +232,7 @@ through), or **Skipped**.
 | 4.7b | Layout Counterfactuals | **Implemented** | click a losing candidate → `explainLoss()` names the largest sub-score gap and the point delta |
 | 4.7c | Layout Health Check | **Implemented** | pass/warn/fail checklist on the 6 sub-scores |
 | 4.9 | Performance-aware composition | **Implemented** | `renderCost` sub-score (weight 0.06) as a tie-breaker inside the same fitness function |
-| 4.10 | Automated stress testing ("Stress Lab") | **Implemented** | 200 randomized surfaces, tiered pass/degraded/failed, click-through inspection; 0 failed every run; robustness moved from ~50% to ~65% once `contextFit` shipped |
+| 4.10 | Automated stress testing ("Stress Lab") | **Implemented** | 200 randomized surfaces, tiered pass/degraded/failed, click-through inspection; 0 failed every run; robustness moved ~50% → ~65% (`contextFit`) → ~87% (fixing a minTapTarget-sizing bug the Stress Lab itself surfaced) |
 | 4.13 | Self-healing / fault-tolerant layout (combined stressors) | **Implemented** | long headline + invalid hero src + missing logo src + tiny surface + longer German CTA, all at once; recovers with CTA kept (now via `grid`, 4/4 visible — `contextFit`'s square-aspect bonus improved on the pre-fix `vertical-stack`, 3/4 visible) |
 | 4.14 | Interactive vs. passive layout strategy | **Implemented** | touch surfaces get a genuinely bigger CTA (candidates.ts sizing) and `contextFit` penalizes `overlay-safe-margins` (corner-spread targets) under touch; far-viewing/short-attention surfaces reward strategies that keep fewer, larger elements visible |
 | 4.16 | Side-by-side multi-surface view | **Implemented** | all 5 surfaces at once in phone/wide/square frames, each a real resolved layout |
@@ -266,7 +276,7 @@ src/
     self-healing-scenario.ts adversarial spec + tiny surface (5.2)
     render-dom.ts            deliberate stub (framework-agnostic renderer seam)
     spec.invalid-example.ts.txt   compile-error demonstration (excluded from build)
-    __tests__/               11 Vitest suites, 93 tests
+    __tests__/               11 Vitest suites, 98 tests
   components/
     SurfaceStage.tsx         the one ResolvedLayout → pixels renderer
     LayoutDebugger.tsx       explainability panel 1
