@@ -158,6 +158,77 @@ describe("resolveLayout — priority-based degradation on a shrunk retail kiosk 
   });
 });
 
+/**
+ * §7.3 — proves the pipeline fails GRACEFULLY (never crashes, never produces
+ * an invalid layout) on a surface that is mathematically impossible to
+ * satisfy, closing the one gap flagged against sibling implementations of
+ * this brief.
+ *
+ * Constructed inline (not added to sample-data.ts, which is reserved for
+ * realistic profiles): a valid `SurfaceProfile` shape — it passes
+ * `defineSurface()`'s Phase 1 validation cleanly — that is simply too small
+ * to lay out at all.
+ *
+ * The phase brief's own illustrative example (a touch surface with
+ * `minTapTarget` larger than the whole surface) does NOT, on inspection,
+ * actually make a surface unplaceable in this engine: a clickable element's
+ * declared `minSize` (not the touch-inflated `preferred`) is what
+ * `placeElementsInOrder` checks before dropping it, and `minTapTarget`
+ * non-compliance is only ever a `constraintViolations` / `tapTargetCompliance`
+ * SCORE penalty (see scoring.ts), never a placement blocker — so a
+ * `minTapTarget` alone, however large, cannot by itself force a hard-fail.
+ * This surface therefore combines that illustrative constraint with the one
+ * that actually IS a hard geometric blocker: both dimensions (10×8) are
+ * smaller than even `emergency-fit`'s last-resort floor
+ * (`EMERGENCY_MIN_SIZE = 24×16` in candidates.ts) — so not even the
+ * always-visible headline can be placed at its most relaxed possible size, by
+ * ANY of the five strategies, and the pipeline must fall through to a
+ * universal hard-fail rather than silently shipping something invalid.
+ */
+describe("resolveLayout — a mathematically unsatisfiable surface (§7.3)", () => {
+  const impossible = defineSurface({
+    id: "impossible-10x8",
+    name: "unsatisfiable — smaller than even the emergency-fit floor",
+    width: 10,
+    height: 8,
+    touchOnly: true,
+    minTapTarget: 120, // larger than the entire surface, per the phase brief's own example
+  });
+
+  it("is a valid SurfaceProfile — Phase 1 validation accepts it (it is merely impossible to lay out, not malformed)", () => {
+    expect(impossible.width).toBe(10);
+    expect(impossible.height).toBe(8);
+    expect(impossible.minTapTarget).toBe(120);
+  });
+
+  it("does not throw or crash when run through the full pipeline", () => {
+    expect(() => {
+      const context = resolveContext(impossible);
+      resolveLayout(graph, context, impossible);
+    }).not.toThrow();
+  });
+
+  it("every candidate hard-fails to overall 0, and the returned layout has zero visible elements — never an overlapping/out-of-bounds one", () => {
+    const context = resolveContext(impossible);
+    const { layout, trace } = resolveLayout(graph, context, impossible);
+
+    expect(trace.candidateScores.every((c) => c.score.overall === 0)).toBe(true);
+    expect(layout.elements.every((e) => !e.visible)).toBe(true);
+
+    // Belt-and-braces: even though nothing is visible here, whatever the
+    // pipeline DID return must still respect both hard invariants — this
+    // assertion would catch a regression on a less-extreme "impossible"
+    // surface where a strategy manages to keep something (incorrectly) visible.
+    assertNoOverlaps(layout);
+    for (const e of visibleElements(layout)) {
+      expect(e.x).toBeGreaterThanOrEqual(-0.5);
+      expect(e.y).toBeGreaterThanOrEqual(-0.5);
+      expect(e.x + e.width).toBeLessThanOrEqual(impossible.width + 0.5);
+      expect(e.y + e.height).toBeLessThanOrEqual(impossible.height + 0.5);
+    }
+  });
+});
+
 describe("resolver / candidates / scoring are surface-agnostic (source-level check)", () => {
   const SAMPLE_SURFACE_IDS =
     /mobilePortrait|mobileLandscape|broadcastLowerThird|retailKiosk|printQRPanel/;
