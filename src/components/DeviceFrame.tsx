@@ -34,6 +34,19 @@ export interface DeviceFrameProps {
 const PHONE_MAX_RATIO = 0.8;
 const TV_MIN_RATIO = 2.5;
 
+/**
+ * A real TV is physically wider than it is tall — this is the floor on that
+ * shape for the chassis itself, independent of the surface's own aspect
+ * ratio. Without it, forcing "TV" onto a portrait surface (or "Auto" ever
+ * mis-classifying one) shrink-wraps the whole chassis to the content's own
+ * narrow width, producing a tall black column that reads as broken, not as a
+ * television. Real content narrower than this gets pillarboxed — centred on a
+ * dark screen background with letterbox bars on either side — exactly how a
+ * real TV shows a non-native-aspect source, rather than distorting the
+ * chassis into a shape no TV has ever had.
+ */
+const MIN_TV_ASPECT = 16 / 9;
+
 /** Auto-detection is aspect-ratio-driven only — never a lookup by surface id/name. */
 function effectiveDeviceFor(
   deviceType: DeviceType,
@@ -86,9 +99,17 @@ export function DeviceFrame({
   }
 
   if (effective === "tv") {
+    // Mirror SurfaceStage's own fit-scale so the chassis width is computed
+    // from the SAME rendered pixel size, not a separate guess.
+    const scale = Math.min(1, maxWidth / surface.width, maxHeight / surface.height);
+    const scaledW = surface.width * scale;
+    const scaledH = surface.height * scale;
+    const frameWidth = Math.max(scaledW, scaledH * MIN_TV_ASPECT);
+    const isPillarboxed = frameWidth > scaledW + 0.5;
+
     return (
       <div className="ale-device ale-device--tv" data-testid="device-frame" data-device="tv">
-        <div className="ale-tv-frame">
+        <div className="ale-tv-frame" style={{ width: frameWidth }}>
           <div className="ale-tv-topbar">
             <span className="ale-tv-live">
               <span className="ale-tv-dot" /> LIVE BROADCAST
@@ -97,7 +118,14 @@ export function DeviceFrame({
               {surface.width}×{surface.height} · CH 07
             </span>
           </div>
-          <div className="ale-tv-screen">{stage}</div>
+          <div
+            className="ale-tv-screen"
+            data-testid="tv-screen"
+            data-pillarboxed={isPillarboxed}
+            style={{ width: frameWidth, justifyContent: "center" }}
+          >
+            {stage}
+          </div>
           <div className="ale-tv-bottombar">
             <span className="ale-tv-brand">ADAPTIVE LAYOUT ENGINE</span>
             <span className="ale-tv-led" />
