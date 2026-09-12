@@ -204,9 +204,75 @@ has a real choice:
 | `overlay-safe-margins` | four elements anchored to the four corners (`tl, br, tr, bl`), each capped at half the box per axis so corners can't overlap; the two highest-priority elements land in **opposite** corners; a 5th element and beyond are dropped |
 
 All four run through one shared engine, `placeElementsInOrder(requests, box,
-layoutFn)`, so priority ordering and shrink/drop logic live in exactly one place.
-Resolution order is canonical: `priority` ascending, then `id` ascending as a
-tie-break (`orderedRequests`).
+layoutFn, growAxes)`, so priority ordering and shrink/drop/grow logic live in
+exactly one place. Resolution order is canonical: `priority` ascending, then
+`id` ascending as a tie-break (`orderedRequests`).
+
+### Grow into slack (§4c — comparative analysis, `Adaptive-Resizing-Logic.md`)
+
+A companion analysis compared this project's resizing approach against three
+other independent implementations of the same brief. The one capability
+present in another project (a two-pass "measure, then redistribute leftover
+space" allocator) and genuinely absent here was: **every element only ever
+shrank toward its preferred size, never grew past it** — a spacious surface
+left dead whitespace around a small element instead of using the room. That
+gap is now closed, scoped conservatively:
+
+* Each strategy declares which axes are safe to grow (`GrowAxes`, passed to
+  `placeElementsInOrder`) — safe meaning the strategy's own slot ceiling on
+  that axis is independent per element, never reduced by what a sibling did:
+  * `vertical-stack`: width is free (every element sees the same `box.width`);
+    height is the cascading, cursor-based axis and stays shrink-only.
+  * `horizontal-split`: the mirror — height is free, width is cascading.
+  * `grid`: both axes are free (cell geometry comes from row/col alone).
+  * `overlay-safe-margins`: **opts out entirely** — a right/bottom-anchored
+    corner's own `x`/`y` is derived from its own final width/height
+    (`box.width - w`), so growing would also require re-deriving position;
+    not worth the coupling for a strategy whose whole point is hugging the
+    margin, not filling space.
+* Growth is capped at `GROWTH_CAP_FACTOR = 1.4` × the element's **own**
+  preferred size (not "fill the whole slot") — a small CTA on a 1920px-wide
+  broadcast surface becomes a nicely-sized button, not an edge-to-edge bar.
+  Being relative to each element's own preferred also means two elements with
+  different preferred sizes (e.g. a far-viewing-inflated headline vs. a near
+  one) still end up different sizes after growth, not both maxed at the same
+  slot ceiling.
+* `brandRules.locked` elements are exempt — growth is skipped entirely
+  (`request.locked`), so a locked logo never balloons past its declared
+  `preferredSize`, preserving the existing brand-lock guarantee in
+  `constraintViolationsScore` exactly as before.
+* `sizeAxis(preferred, slotMax, canGrow)` unifies both directions: shrink-only
+  is `Math.min(preferred, slotMax)`; growable is `Math.min(slotMax,
+  preferred × 1.4)` — when `preferred > slotMax` (needs shrinking) the second
+  form still resolves to `slotMax`, so growth and shrink share one formula.
+* The Layout Debugger gets a third note type alongside shrink/drop —
+  `growNote()` — e.g. `headline: wanted 411×96, grew to 411×134 (+40%) — extra
+  room available`, shown with a ✓ rather than the shrink note's ⚠️.
+
+Verified live: on `mobileLandscape` (844×390), `horizontal-split` wins and
+both `headline` and `cta` grow 40% in height (the free axis there) — visibly
+bigger, more confident copy on a screen with genuine room, not just
+avoiding overflow on a small one. `candidates.test.ts` ("grow into slack,
+capped, brand-lock exempt") asserts all of the above, including that the hard
+non-overlap/in-bounds invariants still hold for every strategy with growth
+active.
+
+**What was deliberately NOT ported** from the same analysis, and why:
+* A different project's "only keep a drop if it measurably raised the score"
+  retry loop — doesn't map cleanly onto strategy-vs-strategy selection (our
+  architecture picks between complete candidates, it doesn't retry drops
+  within one); the complexity wasn't worth it for the same outcome our
+  scoring already achieves.
+* A different project's proportional-to-content-rect sizing (e.g. `fontSize =
+  contentHeight × 0.28`) instead of advertiser-declared `minSize`/`preferredSize`
+  — a deliberate, tested architectural choice here (§6), not an oversight;
+  proportional formulas trade away the "advertiser states intent, engine
+  respects it" guarantee this project is built around.
+* A 13-step graduated degradation pipeline (tighten spacing → hide decorative
+  content → shrink CTA, in measured-impact order) — explicitly the kind of
+  scope the project brief warns against over-engineering (§4.4's "lightweight,
+  not a general-purpose solver"); the existing single-pass shrink-then-drop
+  cascade already has a documented, tested degradation order (§5).
 
 Text/button elements that carry a literal `text` string are sized from a real
 `measureText()` pass (`src/core/text-measure.ts`) instead of `preferredSize`:
