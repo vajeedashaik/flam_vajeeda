@@ -25,8 +25,11 @@ describe("buildGraph — sample spec", () => {
     );
 
     const logo = graph.nodes.find((n) => n.id === "logo");
-    expect(logo?.priority).toBe(5);
-    expect(logo?.importance).toBe("nice-to-have");
+    // §7.7: logo priority 5→4 and importance nice-to-have→critical — promoted
+    // to visibility:"always" alongside price, so it is never the element
+    // sacrificed first; product-image (priority 5 now) is.
+    expect(logo?.priority).toBe(4);
+    expect(logo?.importance).toBe("critical");
     expect(logo?.preferredSize).toEqual({ width: 96, height: 32 });
     expect(logo?.brandRules).toEqual({
       locked: true,
