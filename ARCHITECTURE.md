@@ -241,6 +241,17 @@ gap is now closed, scoped conservatively:
   (`request.locked`), so a locked logo never balloons past its declared
   `preferredSize`, preserving the existing brand-lock guarantee in
   `constraintViolationsScore` exactly as before.
+* `interaction: "clickable"` elements are **also** exempt (`request.interactive`)
+  — found via visual inspection, not a test: on `mobileLandscape`,
+  `horizontal-split`'s free axis is height, and growing the CTA's height 40%
+  turned a wide, short pill button (preferred `138×65`, a 2.1:1 shape) into a
+  squat `138×91` blob that visually dominated the headline next to it — a real
+  bug, not a stylistic quibble. A clickable element's size is already a
+  deliberate, purposeful number by the time growth would run (touch-scale +
+  minTapTarget-targeting, both above in the same function) — piling generic
+  slack-growth on top of that is what produced the blob. Text and image
+  elements have no equivalent "must keep looking like X" expectation, so they
+  still grow normally.
 * `sizeAxis(preferred, slotMax, canGrow)` unifies both directions: shrink-only
   is `Math.min(preferred, slotMax)`; growable is `Math.min(slotMax,
   preferred × 1.4)` — when `preferred > slotMax` (needs shrinking) the second
@@ -250,12 +261,12 @@ gap is now closed, scoped conservatively:
   room available`, shown with a ✓ rather than the shrink note's ⚠️.
 
 Verified live: on `mobileLandscape` (844×390), `horizontal-split` wins and
-both `headline` and `cta` grow 40% in height (the free axis there) — visibly
-bigger, more confident copy on a screen with genuine room, not just
-avoiding overflow on a small one. `candidates.test.ts` ("grow into slack,
-capped, brand-lock exempt") asserts all of the above, including that the hard
-non-overlap/in-bounds invariants still hold for every strategy with growth
-active.
+`headline` grows 40% in height (the free axis there) — visibly bigger, more
+confident copy on a screen with genuine room — while `cta` stays at its exact
+touch-adjusted `138×65`, not grown. `candidates.test.ts` ("grow into slack,
+capped, brand-lock exempt") asserts all of the above, including the CTA
+regression test and that the hard non-overlap/in-bounds invariants still hold
+for every strategy with growth active.
 
 **What was deliberately NOT ported** from the same analysis, and why:
 * A different project's "only keep a drop if it measurably raised the score"
@@ -607,15 +618,36 @@ Repeated unseeded runs land in an **86–89%** "robustness" band and, in every
 run, **0 failed**. This band moved from **49–54%** (pre-`contextFit`) to
 **62–68%** (`contextFit` added, §4) to the current **86–89%** once the
 minTapTarget-sizing bug above was fixed — three real, measured improvements,
-not re-tuned thresholds. Inspecting the residual ~25 degraded entries after
-the fix shows a clean, honest picture: essentially all of them are surfaces
-genuinely too small for any real content (`100×600`, `120×2000`, `320×50`,
-and similar) — the "systemic mediocre score on a reasonably-sized surface"
-failure mode is gone; what's left is the correct, expected floor. The number
-that matters for correctness is `failed = 0`: across 200 adversarial surfaces
-including `3840×2160` and `120×2000`, the hard-invariant guarantee from §4
-held every time. The robustness figure is the *quality* bar (score ≥ 70), not
-a correctness bar — see §10 for why that metric is soft.
+not re-tuned thresholds. The number that matters for correctness is
+`failed = 0`: across 200 adversarial surfaces including `3840×2160` and
+`120×2000`, the hard-invariant guarantee from §4 held every time. The
+robustness figure is the *quality* bar (score ≥ 70), not a correctness bar —
+see §10 for why that metric is soft.
+
+### Conclusion: what the ~25 degraded entries actually are
+
+Counting degraded entries without asking why is exactly the kind of number
+this project's whole philosophy argues against — so `categorizeStressDetail()`
++ `summarizeProblems()` (`stress-lab.ts`) bucket every degraded/failed entry by
+root cause, computed purely from data `runStressTest` already produces
+(`visibleCount`, `overallScore`, `outcome` — never a hardcoded element id, same
+rule every other file in this pipeline follows). The Stress Lab UI renders
+this as a **Conclusion** panel above the raw entry list. A representative run:
+
+| category | share | what it means |
+|---|---|---|
+| **nothing fits at all** (`visibleCount === 0`) | ~65% of degraded | Not even the single highest-priority element could be placed by *any* strategy — some axis of the surface is smaller than the ad's own declared minimum (e.g. width below the headline's `minSize.width: 180`). Every element cascades to dropped. Scoring this `0` is correct: there is no valid layout to prefer over another. |
+| **a must-keep element was dropped** (`visibleCount > 0 && overallScore === 0`) | ~30% of degraded | At least one element fit, but not enough room remained to also keep every `visibility:"always"` element (headline, cta) — the resolver refuses to call that valid rather than silently shipping an ad missing something the spec marked non-negotiable. |
+| **valid, but a real quality ceiling** (`0 < overallScore < 70`) | ~5% of degraded | A genuine, non-overlapping, in-bounds layout with every must-keep element intact — just sparse (e.g. `200×200` keeping 2 of 5). The score is telling the truth about a constrained surface, not failing to find a better answer. |
+
+The headline takeaway: **every degraded entry is one of these three honest
+outcomes, never a resolver bug** — categorized directly from a real 200-surface
+run, not asserted. `invariant-violation` (an element that actually overlapped
+or clipped, which would indicate a real bug) never appears — consistent with
+`failed = 0` holding every run. `stress-lab.test.ts` asserts the same
+partition holds structurally: every degraded/failed entry falls into exactly
+one of the three honest categories, and the invariant-violation bucket stays
+empty.
 
 The unit test `stress-lab.test.ts` asserts `generateRandomSurfaces(50)` never
 throws and `runStressTest` on 200 surfaces produces **zero** "failed" entries.
@@ -675,9 +707,12 @@ produces a layout with zero overlaps / out-of-bounds **and**
 * **The "robustness" metric conflates quality with correctness.** `passed`
   requires `score ≥ 70`; true robustness (no hard invariant ever broken) is
   effectively 100% across every run regardless of the quality threshold. The
-  ~65% headline number still understates correctness and overstates how often
-  the layout is genuinely poor. I'd split the metric into "invariant-safe %"
-  (the real guarantee) and "quality %".
+  ~87% headline number still understates correctness (which is ~100%) — the
+  gap matters more on a surface where the quality bar is failed, not just
+  crossed. I'd split the metric into "invariant-safe %" (the real guarantee)
+  and "quality %", and the Stress Lab's Conclusion panel (§8) already moves in
+  that direction by explaining *why* each degraded entry landed there instead
+  of just counting it.
 * **Text measurement uses the Canvas `measureText()` API**, which is close to but
   not identical to the browser's final text layout (kerning, font fallback,
   sub-pixel rounding, `text-wrap: balance`). In the Vitest "node" environment
@@ -706,3 +741,51 @@ produces a layout with zero overlaps / out-of-bounds **and**
   occasionally a shade more conservative (smaller) than the true optimum, never
   larger. Purely cosmetic: it never touches the resolved `x/y/width/height`
   the resolver actually guarantees non-overlapping.
+
+---
+
+## 11. Presentation-layer chrome (device frames, debug overlay, Fluid Stress Test)
+
+Three purely cosmetic features layered on top of `SurfaceStage` — none of them
+touch `resolver.ts` / `candidates.ts` / `scoring.ts`, matching this project's
+own rule that the UI is a presentation layer only.
+
+**`DeviceFrame.tsx`** wraps `SurfaceStage` in a phone bezel, a TV chassis, or a
+clean studio/browser frame, selected via aspect-ratio thresholds (`Auto`) or a
+manual override — never a lookup by surface id. It wraps the renderer, it
+doesn't replace it: `<DeviceFrame>` renders exactly one `<SurfaceStage>` as a
+child, so every debug-overlay / device-frame combination is really the same
+`ResolvedLayout → pixels` path underneath.
+
+**Bug found by inspection, now fixed: the TV chassis had no notion of "a TV is
+wider than it is tall."** `.ale-tv-frame` had no explicit width, so it
+shrink-wrapped to whatever `SurfaceStage` rendered — forcing "TV" onto a
+portrait surface produced a tall, narrow black column with the bottom
+bezel/stand pushed out of view, nothing that reads as a television. Fixed with
+`MIN_TV_ASPECT = 16/9`: `DeviceFrame` computes the same fit-scale
+`SurfaceStage` will use, then sets the chassis width to
+`Math.max(scaledWidth, scaledHeight × 16/9)`. When the real content is
+narrower than that floor, it's centred inside a wider `.ale-tv-screen` with a
+dark background — a genuine pillarbox (letterbox bars either side), exactly
+how a real TV displays a non-native-aspect source, rather than distorting the
+chassis into a shape no TV has ever had. The top bar, screen, and bottom bezel
+all share the one computed width via CSS's default `align-items: stretch` on
+a column flex container, so they stay visually consistent without each
+needing its own width logic.
+
+**`DebugOverlay.tsx`** draws a dashed safe-area outline plus a colored,
+zone-tinted, labeled box per placed element directly inside `SurfaceStage`'s
+already-transformed `.ale-surface` div — so it rides the same `scale()` the
+real elements do and needs no separate coordinate math. Zone is a geometric
+heuristic (which eighth of the usable box an element's centre falls in),
+computed here, not a resolver concept — matches the project's rule against
+inventing new coupling between presentation and resolution.
+
+**Fluid Stress Test** (`DegradationSlider.tsx`) is a `requestAnimationFrame`
+loop that drives the same width/height state the manual sliders do, via
+`w = centerW + ampW·sin(t·0.9)`, `h = centerH + ampH·cos(t·0.7)` — two
+different frequencies, out of phase, so the surface sweeps through genuinely
+different aspect ratios rather than pulsing uniformly. `centerW`/`ampW` are
+derived from `[MIN_DIM, baseSurface.width]` so the sweep always spans that
+surface's full valid range, not a fixed pixel constant. Starting a manual drag
+stops it.
