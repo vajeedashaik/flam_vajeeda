@@ -52,6 +52,22 @@ const TOUCH_TARGET_SCALE = 1.15;
  */
 const GROWTH_CAP_FACTOR = 1.4;
 
+/**
+ * §7.9 (found via live measurement): with every non-locked element growing at
+ * the SAME 1.4x cap, a text element with a generously-declared
+ * `preferredSize.height` (the headline, meant to leave room to wrap to two
+ * lines) could grow to rival or edge out the product photo's own area on a
+ * strategy that grows both axes (`grid`) — measured live on a wide phone
+ * surface: headline 29% of the ad's area vs. the photo's 39.8%, a real but
+ * uncomfortably thin margin for something meant to read as "the highlight."
+ * The hero role gets a larger growth ceiling than everything else so it stays
+ * clearly, comfortably the largest element whenever a strategy lets anything
+ * grow at all — this is a bonus on top of its own preferred size, not a
+ * penalty on any other element, so it never fights `visualBalance` or the
+ * shrink cascade.
+ */
+const HERO_GROWTH_CAP_FACTOR = 1.9;
+
 export type CandidateStrategy =
   | "vertical-stack"
   | "horizontal-split"
@@ -303,11 +319,19 @@ function growNote(r: PlacementRequest, w: number, h: number): string {
  * One axis (width or height) of the final placed size. Shrink-only unless
  * `canGrow` — even then, growth never exceeds the slot's own ceiling
  * (`slotMax`), so it can only ever use space the strategy already decided is
- * safely this element's own (never a sibling's).
+ * safely this element's own (never a sibling's). `growthCap` defaults to
+ * `GROWTH_CAP_FACTOR`; the hero role passes `HERO_GROWTH_CAP_FACTOR` instead
+ * (see its doc comment) so the product photo keeps a clear size advantage
+ * whenever anything is allowed to grow at all.
  */
-function sizeAxis(preferred: number, slotMax: number, canGrow: boolean): number {
+function sizeAxis(
+  preferred: number,
+  slotMax: number,
+  canGrow: boolean,
+  growthCap: number = GROWTH_CAP_FACTOR,
+): number {
   if (!canGrow) return Math.min(preferred, slotMax);
-  return Math.min(slotMax, preferred * GROWTH_CAP_FACTOR);
+  return Math.min(slotMax, preferred * growthCap);
 }
 
 /** Which axes a strategy allows an element to grow beyond its preferred size on. */
@@ -377,8 +401,9 @@ export function placeElementsInOrder(
     // small pill next to dead space.
     const canGrowWidth = !request.locked;
     const canGrowHeight = !request.locked && !request.interactive;
-    const width = sizeAxis(request.preferred.width, slot.maxWidth, growAxes.width && canGrowWidth);
-    const height = sizeAxis(request.preferred.height, slot.maxHeight, growAxes.height && canGrowHeight);
+    const growthCap = request.role === "hero" ? HERO_GROWTH_CAP_FACTOR : GROWTH_CAP_FACTOR;
+    const width = sizeAxis(request.preferred.width, slot.maxWidth, growAxes.width && canGrowWidth, growthCap);
+    const height = sizeAxis(request.preferred.height, slot.maxHeight, growAxes.height && canGrowHeight, growthCap);
     const el: ResolvedElement = {
       id: request.id,
       x: slot.x,
@@ -404,12 +429,20 @@ export function placeElementsInOrder(
       continue;
     }
 
-    if (width > request.preferred.width + EPS || height > request.preferred.height + EPS) {
+    // §7.10 (found via live inspection, self-healing demo): this used to
+    // decide "grew" vs "shrunk" per-axis with an OR — so an element whose
+    // WIDTH shrank drastically but whose HEIGHT grew by even a fraction of a
+    // pixel was labelled "grew to ... (+X%)" while X was actually NEGATIVE
+    // (the growNote% is area-based), producing a nonsensical note like
+    // "wanted 1569×120, grew to 120×130 (+-92%)" for an element that had
+    // just been shrunk to a THIRTEENTH of its width. Both the verdict (grew
+    // vs shrunk) and the percentage are now driven by the same AREA
+    // comparison, so they can never disagree with each other again.
+    const beforeArea = request.preferred.width * request.preferred.height;
+    const afterArea = width * height;
+    if (afterArea > beforeArea) {
       notes.push(growNote(request, width, height));
-    } else if (
-      width < request.preferred.width - EPS ||
-      height < request.preferred.height - EPS
-    ) {
+    } else if (afterArea < beforeArea) {
       notes.push(shrinkNote(request, width, height));
     }
     placed.push(el);
@@ -502,6 +535,27 @@ function verticalStack(requests: PlacementRequest[], box: Box): PlacementOutcome
 const EMERGENCY_MIN_SIZE: SizeConstraint = { width: 24, height: 16 };
 
 /**
+ * §7.9 (found via live measurement): once §7.9's fix stopped degradable
+ * elements from outsizing the always-visible ones, a subtler issue remained —
+ * every always-visible element shared the SAME `EMERGENCY_MIN_SIZE` floor, so
+ * the product photo (role "hero", the ad's declared highlight) rendered at
+ * the exact same tiny size as the headline and CTA chips, indistinguishable
+ * from them. "The highlight, handled carefully" should still read as the
+ * highlight even at the absolute floor — so the hero role gets a visibly
+ * larger (roughly 3x the area, a 4:3 photo-like shape) floor than plain
+ * text/button chips. Still tiny in absolute terms (this is the worst-case
+ * fallback, not a real layout), but large enough to visually anchor the ad
+ * instead of blending into the row/column as an equal-sized dot.
+ */
+const EMERGENCY_HIGHLIGHT_SIZE: SizeConstraint = { width: 48, height: 36 };
+
+/** The emergency floor for one request: the hero role gets the larger,
+ *  photo-shaped floor; every other always-visible element gets the plain one. */
+function emergencyFloorFor(role: string): SizeConstraint {
+  return role === "hero" ? EMERGENCY_HIGHLIGHT_SIZE : EMERGENCY_MIN_SIZE;
+}
+
+/**
  * Last-resort fallback (§10 / stress-lab "nothing fits" fix). Same geometry as
  * `verticalStack` (or `horizontalSplit` on a wide box — see below), but every
  * `visibility:"always"` element's preferred AND min size are both replaced
@@ -540,19 +594,50 @@ const EMERGENCY_MIN_SIZE: SizeConstraint = { width: 24, height: 16 };
  * (mirroring `verticalStack`'s). Only the DIRECTION changes; the relaxed-size
  * mechanism, the scoring penalty that keeps it losing when unneeded, and the
  * non-overlap/in-bounds guarantees are identical either way.
+ *
+ * §7.9 (CRITICAL bug found via live measurement, not theorized): degradable
+ * elements used to cascade through this SAME pass at their normal, full,
+ * un-relaxed size — including growing into whatever slack the row/column's
+ * free axis offered. Once always-elements are miniaturized to a 24×16 floor,
+ * that "slack" is almost the entire box, so a degradable element (price,
+ * logo) could end up FAR larger than the always-elements it was supposedly
+ * less important than — measured live on a real 320×50 banner: price
+ * rendered at 198×50 (76% of the ad's total area) while headline, cta, and
+ * the product photo — the actual highlight — were each squeezed to a 24×22
+ * sliver (4% apiece). The visual hierarchy was completely inverted: the
+ * least important content dominated the ad. `emergencyFit` now places ONLY
+ * always-visible elements — any request with `alwaysVisible: false` returns
+ * a `null` slot unconditionally, dropping it (and, by the shared engine's
+ * cascade rule, everything lower-priority after it, which in this spec is
+ * always other degradable elements — see the ordering note below). This
+ * makes emergency-fit a genuine "bare essentials only" last resort: if a
+ * surface is constrained enough to need it at all, showing secondary text at
+ * full size while the actual message is reduced to a dot is not a
+ * reasonable layout, it's a worse one than simply not showing that text.
+ *
+ * This relies on every `visibility:"always"` element in the spec having a
+ * BETTER (lower) priority number than every non-always one — true by
+ * construction here (headline=1, cta=2, product-image=3 are always;
+ * price=4, logo=5 are degradable) and asserted by
+ * `candidates.test.ts`. If that ever stopped holding, unconditionally
+ * dropping a non-always element could cascade-drop a LOWER-priority-number
+ * (more important) always element placed after it in priority order — which
+ * would be a real bug, not a re-tuned threshold — so the assumption is
+ * checked directly, not just implied.
  */
 function emergencyFit(requests: PlacementRequest[], box: Box): PlacementOutcome {
-  const relaxed = requests.map((r) =>
-    r.alwaysVisible
-      ? { ...r, preferred: EMERGENCY_MIN_SIZE, min: EMERGENCY_MIN_SIZE }
-      : r,
-  );
+  const relaxed = requests.map((r) => {
+    if (!r.alwaysVisible) return r;
+    const floor = emergencyFloorFor(r.role);
+    return { ...r, preferred: floor, min: floor };
+  });
 
   if (box.width > box.height) {
     return placeElementsInOrder(
       relaxed,
       box,
-      ({ placed }) => {
+      ({ placed, request }) => {
+        if (!request.alwaysVisible) return null;
         const cursorX = placed.reduce((maxX, e) => Math.max(maxX, e.x + e.width), box.x);
         const remaining = box.x + box.width - cursorX;
         if (remaining <= 0) return null;
@@ -565,7 +650,8 @@ function emergencyFit(requests: PlacementRequest[], box: Box): PlacementOutcome 
   return placeElementsInOrder(
     relaxed,
     box,
-    ({ placed }) => {
+    ({ placed, request }) => {
+      if (!request.alwaysVisible) return null;
       const cursorY = placed.reduce((maxY, e) => Math.max(maxY, e.y + e.height), box.y);
       const remaining = box.y + box.height - cursorY;
       if (remaining <= 0) return null;
