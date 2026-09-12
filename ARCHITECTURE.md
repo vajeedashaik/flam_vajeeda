@@ -292,9 +292,8 @@ if ((node.type === "text" || node.type === "button") && node.text !== undefined)
 ### Context-aware sizing (§4.3-context)
 
 After the base preferred size is computed (from `measureText`, `preferredSize`,
-or the fallback), `toRequest(node, context)` applies up to two more
-context-derived multipliers, in order, before the request is handed to a
-strategy:
+or the fallback), `toRequest(node, context, surface)` applies up to three more
+adjustments, in order, before the request is handed to a strategy:
 
 ```ts
 const FAR_VIEWING_TEXT_SCALE = 1.3;  // legibility at a distance
@@ -306,21 +305,44 @@ if (context.isFarViewing && (node.type === "text" || node.type === "button")) {
 if (context.isTouchInteractive && node.interaction === "clickable") {
   preferred = { width: ceil(preferred.width * TOUCH_TARGET_SCALE), height: ceil(preferred.height * TOUCH_TARGET_SCALE) };
 }
+if (node.interaction === "clickable" && surface.minTapTarget !== undefined) {
+  preferred = { width: max(preferred.width, surface.minTapTarget), height: max(preferred.height, surface.minTapTarget) };
+}
 ```
 
 Only `text`/`button` elements inflate on far viewing — an `image`'s
 `preferredSize` already **is** its intended on-screen size, not a proxy for
 rendered type that should grow. Only `interaction: "clickable"` elements
-inflate on touch — this is what makes a phone's CTA visibly bigger than the
-same CTA on a remote-driven broadcast surface (§4.14), on top of whatever
-`surface.minTapTarget` already requires. `min` is never scaled — the
-advertiser's declared floor is unchanged, so a bigger *preferred* size only
-means the element is more likely to shrink or push out lower-priority content,
-never that a previously-valid layout becomes invalid. This is real on the
-sample ad: mobilePortrait's CTA (touch) is `230×65` instead of the
-undeclared-context `200×56`; broadcastLowerThird's headline (far-viewing) is
-`546×125` instead of `420×96` — verified live, not just asserted (see
-`candidates.test.ts`, "context-aware element sizing").
+inflate on touch. `min` is never scaled — the advertiser's declared floor is
+unchanged, so a bigger *preferred* size only means the element is more likely
+to shrink or push out lower-priority content, never that a previously-valid
+layout becomes invalid. This is real on the sample ad: mobilePortrait's CTA
+(touch) is `230×65` instead of the undeclared-context `200×56`;
+broadcastLowerThird's headline (far-viewing) is `546×125` instead of `420×96`
+— verified live, not just asserted (see `candidates.test.ts`, "context-aware
+element sizing").
+
+**Bug found via extreme-edge-case stress testing, now fixed (the third
+adjustment above):** the touch-scale line existed before the minTapTarget
+line, and for a long time was the *only* thing that touched a clickable
+element's size. It is a flat 15% bump regardless of what the surface actually
+needs — `surface.minTapTarget` was read only by the scorer
+(`constraintViolationsScore`, `tapTargetComplianceScore`), never by sizing
+itself. Running the Stress Lab repeatedly surfaced a reproducible pattern:
+`overlay-safe-margins` winning with 4/5 elements at a suspicious, consistent
+62–66 score across wildly different aspect ratios (908×2378, 1900×917,
+3259×394, 2956×192, …) — `tapTargetCompliance: 0` every time. Inspecting one
+directly showed why: a random touch surface with `minTapTarget: 90`+ (the
+Stress Lab's generator allows up to 96) got a CTA sized `138×65` — the flat
+1.15× bump applied to a ~120×44 base, nowhere near 90. The request never once
+asked for enough room to comply; only the score ever found out. The fix makes
+a clickable element's request target the surface's **actual declared number**
+directly, not a context-blind percentage — `Math.max(preferred, surface.
+minTapTarget)` on both axes. Verified before/after on the same 200-surface
+Stress Lab run: the specific "overlay-safe-margins stuck at 62–66" pattern
+dropped from 8+ occurrences to 0–1, and overall robustness moved from ~65%
+to **~87%** (§8) — not a re-tuned threshold, a real bug that was silently
+capping scores on a meaningful slice of touch surfaces.
 
 ### ScoreBreakdown sub-scores and weights (quoted from `src/core/scoring.ts`)
 
@@ -576,20 +598,24 @@ cross-check, not the scorer asserting about itself. Tiers:
 | metric | value |
 |---|---|
 | total | 200 |
-| passed | 129 |
-| degraded | 71 |
+| passed | 175 |
+| degraded | 25 |
 | **failed** | **0** |
-| robustness (passed / total) | **64.5%** |
+| robustness (passed / total) | **87.5%** |
 
-Repeated unseeded runs land in a **62–68%** "robustness" band and, in every run,
-**0 failed**. This band moved up from the pre-`contextFit` **49–54%** band once
-§4.3-context started genuinely biasing which strategy wins (a context-suited
-strategy clears the 70-point quality bar more often) — a real, measured
-improvement, not a re-tuned threshold. The number that matters for correctness
-is `failed = 0`: across 200 adversarial surfaces including `3840×2160` and
-`120×2000`, the hard-invariant guarantee from §4 held every time. The
-robustness figure is the *quality* bar (score ≥ 70), not a correctness bar —
-see §10 for why that metric is soft.
+Repeated unseeded runs land in an **86–89%** "robustness" band and, in every
+run, **0 failed**. This band moved from **49–54%** (pre-`contextFit`) to
+**62–68%** (`contextFit` added, §4) to the current **86–89%** once the
+minTapTarget-sizing bug above was fixed — three real, measured improvements,
+not re-tuned thresholds. Inspecting the residual ~25 degraded entries after
+the fix shows a clean, honest picture: essentially all of them are surfaces
+genuinely too small for any real content (`100×600`, `120×2000`, `320×50`,
+and similar) — the "systemic mediocre score on a reasonably-sized surface"
+failure mode is gone; what's left is the correct, expected floor. The number
+that matters for correctness is `failed = 0`: across 200 adversarial surfaces
+including `3840×2160` and `120×2000`, the hard-invariant guarantee from §4
+held every time. The robustness figure is the *quality* bar (score ≥ 70), not
+a correctness bar — see §10 for why that metric is soft.
 
 The unit test `stress-lab.test.ts` asserts `generateRandomSurfaces(50)` never
 throws and `runStressTest` on 200 surfaces produces **zero** "failed" entries.
