@@ -124,17 +124,20 @@ interface PlacementRequest {
   /** brandRules.locked — never resized away from `preferred`, growth included. */
   locked: boolean;
   /**
-   * interaction === "clickable" — exempt from generic "grow into slack"
-   * (see `sizeAxis`). A clickable element's size is already a deliberate,
-   * purposeful number (touch-target scale + the surface's real minTapTarget,
-   * both applied above in this function) — piling the generic slack-growth
-   * multiplier on top of that produced a real, visible bug: a CTA whose
-   * PREFERRED shape is a wide short pill (e.g. 138×65) growing height by 40%
-   * on horizontal-split's free axis became a squat, disproportionate blob
-   * that visually dominated the layout, because growth treats width/height as
-   * independent axes with no notion that a button should keep looking like a
-   * button. Text/image elements have no such fixed-shape expectation, so they
-   * keep growing normally.
+   * interaction === "clickable" — exempt from HEIGHT growth only (see the
+   * `canGrowHeight` check in `placeElementsInOrder`). A clickable element's
+   * size is already a deliberate, purposeful number (touch-target scale + the
+   * surface's real minTapTarget, both applied above in this function) —
+   * piling the generic slack-growth multiplier on top of THAT on the height
+   * axis produced a real, visible bug: a CTA whose preferred shape is a wide
+   * short pill (e.g. 138×65) growing height by 40% on horizontal-split's free
+   * axis became a squat, disproportionate blob, because growth treats
+   * width/height as independent axes with no notion that a button should keep
+   * looking like a button. WIDTH growth has no such failure mode — a button
+   * getting wider while its height stays fixed is exactly what a normal,
+   * full-looking CTA looks like — so clickable elements grow normally on
+   * width (this is what lets the CTA fill horizontal slack on vertical-stack
+   * instead of sitting as an undersized pill next to dead space).
    */
   interactive: boolean;
   /** visibility === "always" — see `emergencyFit` / `EMERGENCY_MIN_SIZE`. */
@@ -159,7 +162,21 @@ function toRequest(
     const measuredWidth = Math.ceil(measureTextWidth(node.text, fontSize));
     const lineHeight = Math.ceil(fontSize * LINE_HEIGHT_FACTOR);
     preferred = {
-      width: Math.max(measuredWidth, node.minSize?.width ?? 0),
+      // BUG FIX: this used to omit `node.preferredSize?.width` entirely — only
+      // the measured text width and minSize.width were ever considered, so a
+      // short string (e.g. a 4-letter brand mark like "DIOR") collapsed to
+      // whatever `measureTextWidth` returned for its literal characters, with
+      // no way for the ad author's own declared preferredSize.width to ever
+      // win. The height branch two lines below already folded in
+      // `preferredSize.height` — width was the one axis silently ignoring it,
+      // which is what made a `preferredSize: {width:96,...}` logo render at
+      // ~42px (illegibly small) and a `preferredSize: {width:200,...}` CTA
+      // collapse toward its 120px minSize instead of its intended 200px.
+      width: Math.max(
+        measuredWidth,
+        node.minSize?.width ?? 0,
+        node.preferredSize?.width ?? 0,
+      ),
       height: Math.max(
         lineHeight,
         node.minSize?.height ?? 0,
@@ -349,9 +366,19 @@ export function placeElementsInOrder(
       continue;
     }
 
-    const canGrow = !request.locked && !request.interactive;
-    const width = sizeAxis(request.preferred.width, slot.maxWidth, growAxes.width && canGrow);
-    const height = sizeAxis(request.preferred.height, slot.maxHeight, growAxes.height && canGrow);
+    // `interactive` (clickable) elements are exempt from HEIGHT growth only —
+    // see the doc comment on `PlacementRequest.interactive` for the "squat
+    // blob" bug that exemption fixes (growing a wide short pill's HEIGHT on
+    // horizontal-split's free axis distorted its shape). WIDTH growth is a
+    // different, ordinary case: a button getting wider while keeping its
+    // height is exactly how real "full-width-ish" CTAs look, so clickable
+    // elements grow normally on that axis — this is what lets the CTA fill
+    // available horizontal slack on vertical-stack instead of sitting as a
+    // small pill next to dead space.
+    const canGrowWidth = !request.locked;
+    const canGrowHeight = !request.locked && !request.interactive;
+    const width = sizeAxis(request.preferred.width, slot.maxWidth, growAxes.width && canGrowWidth);
+    const height = sizeAxis(request.preferred.height, slot.maxHeight, growAxes.height && canGrowHeight);
     const el: ResolvedElement = {
       id: request.id,
       x: slot.x,
@@ -396,14 +423,60 @@ export function placeElementsInOrder(
 // per-element requests. None of them looks at a surface id or an element id.
 
 /**
+ * §7.5: a cascading strategy (vertical-stack, horizontal-split) stacks
+ * elements starting from the box's own top/left edge. On a surface much
+ * larger than the ad actually needs — even after growth — that leaves every
+ * bit of leftover room as ONE lopsided gap on the far side (e.g. the whole ad
+ * pinned to the top of a tall kiosk panel, with a large dead void below it).
+ * That reads as unfinished/accidental, not as a designed composition, and is
+ * a different shape of the same "doesn't look like one full, deliberate ad"
+ * complaint that motivated `compositionCohesion` (scoring.ts §4g) — but
+ * scoring can only choose between candidates a strategy already produced, it
+ * can't fix a lopsided candidate's own geometry. This shifts every VISIBLE
+ * element by the same offset — a uniform translation, so relative positions
+ * (and therefore the non-overlap / already-validated-in-bounds invariants)
+ * are provably unaffected — so the block sits centred in the axis the
+ * strategy cascades along, turning one large one-sided gap into a smaller,
+ * even margin on both sides, which reads as intentional breathing room
+ * instead of an accident. Only touches the axis passed in; the free axis
+ * (already sized per-element to the box on every row/column) needs no
+ * centring of its own.
+ */
+function centerAlongAxis(
+  outcome: PlacementOutcome,
+  box: Box,
+  axis: "x" | "y",
+): PlacementOutcome {
+  const dim = axis === "x" ? "width" : "height";
+  const visible = outcome.elements.filter((e) => e.visible);
+  if (visible.length === 0) return outcome;
+
+  const boxStart = axis === "x" ? box.x : box.y;
+  const boxSize = axis === "x" ? box.width : box.height;
+  const contentEnd = Math.max(...visible.map((e) => e[axis] + e[dim]));
+  const slack = boxStart + boxSize - contentEnd;
+  if (slack <= 0) return outcome;
+
+  const offset = slack / 2;
+  return {
+    notes: outcome.notes,
+    elements: outcome.elements.map((e) =>
+      e.visible ? { ...e, [axis]: e[axis] + offset } : e,
+    ),
+  };
+}
+
+/**
  * One column, elements stacked top→bottom, each as wide as the box allows.
  * WIDTH is a free axis here — every element sees the same full `box.width`
  * regardless of what siblings above/below it did, so growing it can never
  * eat into another element's space (only HEIGHT is the cascading, cursor-based
- * axis, so only height stays shrink-only).
+ * axis, so only height stays shrink-only). The whole stacked block is then
+ * centred vertically in the box (see `centerAlongAxis`) so leftover room
+ * becomes an even top/bottom margin instead of one gap below everything.
  */
 function verticalStack(requests: PlacementRequest[], box: Box): PlacementOutcome {
-  return placeElementsInOrder(
+  const outcome = placeElementsInOrder(
     requests,
     box,
     ({ placed }) => {
@@ -414,6 +487,7 @@ function verticalStack(requests: PlacementRequest[], box: Box): PlacementOutcome
     },
     { width: true, height: false },
   );
+  return centerAlongAxis(outcome, box, "y");
 }
 
 /**
@@ -480,10 +554,11 @@ function emergencyFit(requests: PlacementRequest[], box: Box): PlacementOutcome 
  * One row, elements placed left→right, each as tall as the box allows.
  * Mirror of verticalStack: HEIGHT is the free axis (every element sees the
  * full `box.height`), WIDTH is the cascading cursor-based axis and stays
- * shrink-only.
+ * shrink-only. The whole row is then centred horizontally in the box (see
+ * `centerAlongAxis`), the mirror of vertical-stack's top/bottom centring.
  */
 function horizontalSplit(requests: PlacementRequest[], box: Box): PlacementOutcome {
-  return placeElementsInOrder(
+  const outcome = placeElementsInOrder(
     requests,
     box,
     ({ placed }) => {
@@ -494,6 +569,7 @@ function horizontalSplit(requests: PlacementRequest[], box: Box): PlacementOutco
     },
     { width: false, height: true },
   );
+  return centerAlongAxis(outcome, box, "x");
 }
 
 /**
