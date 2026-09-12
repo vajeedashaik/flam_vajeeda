@@ -1,11 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { productAd } from "../sample-data";
-import { defineSurface } from "../surfaces";
+import { defineSurface, type SurfaceProfile } from "../surfaces";
 import {
+  categorizeStressDetail,
   DEGRADED_SCORE_THRESHOLD,
   generateRandomSurfaces,
   runStressTest,
   seededRng,
+  summarizeProblems,
+  type StressDetail,
 } from "../stress-lab";
 
 describe("generateRandomSurfaces", () => {
@@ -103,5 +106,79 @@ describe("runStressTest — 200 generated surfaces", () => {
       degraded: result.degraded,
       failed: result.failed,
     });
+  });
+});
+
+describe("categorizeStressDetail / summarizeProblems — root-cause analysis of degraded entries", () => {
+  const surface: SurfaceProfile = defineSurface({ id: "cat-test", width: 100, height: 100 });
+
+  function detail(partial: Partial<StressDetail>): StressDetail {
+    return {
+      surface,
+      outcome: "degraded",
+      overallScore: 0,
+      visibleCount: 0,
+      elementCount: 5,
+      ...partial,
+    };
+  }
+
+  it("a passed entry categorizes as null (excluded from the conclusion)", () => {
+    expect(categorizeStressDetail(detail({ outcome: "passed", overallScore: 90, visibleCount: 5 }))).toBeNull();
+  });
+
+  it("a failed (hard-invariant-broken) entry categorizes as invariant-violation regardless of score", () => {
+    expect(categorizeStressDetail(detail({ outcome: "failed", overallScore: 80, visibleCount: 5 }))).toBe(
+      "invariant-violation",
+    );
+  });
+
+  it("zero visible elements categorizes as nothing-fits, even if score were somehow non-zero", () => {
+    expect(categorizeStressDetail(detail({ visibleCount: 0, overallScore: 0 }))).toBe("nothing-fits");
+  });
+
+  it("some elements visible but overall score 0 categorizes as always-element-dropped", () => {
+    expect(categorizeStressDetail(detail({ visibleCount: 2, overallScore: 0 }))).toBe(
+      "always-element-dropped",
+    );
+  });
+
+  it("a valid layout below the degraded threshold categorizes as quality-floor", () => {
+    expect(categorizeStressDetail(detail({ visibleCount: 3, overallScore: 62 }))).toBe("quality-floor");
+  });
+
+  it("summarizeProblems buckets and counts correctly, most-common first, skipping passed entries", () => {
+    const details: StressDetail[] = [
+      detail({ visibleCount: 0, overallScore: 0 }), // nothing-fits
+      detail({ visibleCount: 0, overallScore: 0 }), // nothing-fits
+      detail({ visibleCount: 2, overallScore: 0 }), // always-element-dropped
+      detail({ visibleCount: 3, overallScore: 65 }), // quality-floor
+      detail({ outcome: "passed", overallScore: 95, visibleCount: 5 }), // excluded
+    ];
+
+    const summary = summarizeProblems(details);
+
+    expect(summary.map((s) => s.category)).toEqual([
+      "nothing-fits",
+      "always-element-dropped",
+      "quality-floor",
+    ]);
+    expect(summary[0]!.count).toBe(2);
+    expect(summary[1]!.count).toBe(1);
+    expect(summary[2]!.count).toBe(1);
+    // Every summary row carries a real, non-empty explanation, not a placeholder.
+    for (const s of summary) {
+      expect(s.label.length).toBeGreaterThan(0);
+      expect(s.explanation.length).toBeGreaterThan(20);
+    }
+  });
+
+  it("real 200-surface run: every degraded entry falls into nothing-fits, always-element-dropped, or quality-floor — never invariant-violation", () => {
+    const result = runStressTest(productAd, generateRandomSurfaces(200, seededRng(2026)));
+    const summary = summarizeProblems(result.details);
+
+    expect(summary.some((s) => s.category === "invariant-violation")).toBe(false);
+    const totalCategorized = summary.reduce((sum, s) => sum + s.count, 0);
+    expect(totalCategorized).toBe(result.degraded + result.failed);
   });
 });
