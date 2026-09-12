@@ -163,8 +163,13 @@ Real, specific to what was built (more technical depth in
   undemonstrated.
 - **`overlay-safe-margins` caps at 4 elements** (four corners) and always drops
   the 5th, so it rarely wins on the 5-element sample ad.
-- **Sample data only.** Specs and surfaces are code-defined; the demo renders
-  role-tinted boxes, not real ad copy or imagery.
+- **One sample product, code-defined.** The ad is a single real product (DIOR
+  Backstage Rosy Glow Stick — 012 Rosewood, styled as a Nykaa PDP ad, real
+  headline/price/CTA copy, a real product photo) — not a live catalog. Text
+  elements render their actual `text` at a font size fit to whatever box the
+  resolver placed them in (`SurfaceStage`'s `fitFontSize`, reusing the same
+  `measureTextBlock` the resolver already computes with); specs that declare no
+  `text` still fall back to the id/role/size debug label.
 
 ---
 
