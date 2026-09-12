@@ -492,6 +492,19 @@ body::before {
   gap: var(--gap);
   align-items: start;
 }
+/* Each cell centers its DeviceFrame + caption — without this, a narrow phone
+   chassis sits flush-left in its (often wider) grid cell instead of centred
+   like every other device-frame preview in the app. */
+.ale-multi-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 0;
+  padding: 14px;
+  border-radius: var(--r-md);
+  background: var(--clay-bg);
+  box-shadow: var(--clay-shadow);
+}
 
 /* ---- View transition ---------------------------------------------------------- */
 .ale-view { animation: view-in 0.24s var(--ease) both; }
