@@ -56,7 +56,8 @@ export type CandidateStrategy =
   | "vertical-stack"
   | "horizontal-split"
   | "overlay-safe-margins"
-  | "grid";
+  | "grid"
+  | "emergency-fit";
 
 export interface Candidate {
   strategy: CandidateStrategy;
@@ -136,6 +137,8 @@ interface PlacementRequest {
    * keep growing normally.
    */
   interactive: boolean;
+  /** visibility === "always" — see `emergencyFit` / `EMERGENCY_MIN_SIZE`. */
+  alwaysVisible: boolean;
 }
 
 function toRequest(
@@ -210,6 +213,7 @@ function toRequest(
     min,
     locked: node.brandRules?.locked === true,
     interactive: node.interaction === "clickable",
+    alwaysVisible: node.visibility === "always",
   };
 }
 
@@ -413,6 +417,66 @@ function verticalStack(requests: PlacementRequest[], box: Box): PlacementOutcome
 }
 
 /**
+ * Deliberately tiny — "technically visible," not "legible." The alternative
+ * for a `visibility:"always"` element on a surface smaller than its declared
+ * minSize is showing NOTHING, which is strictly worse than a small chip.
+ * `constraintViolationsScore` still penalizes every element placed below its
+ * REAL declared minSize (it reads the graph node directly, unaffected by this
+ * override), so this never scores as if it were a clean fit — it just stops
+ * being scored as a hard-fail zero.
+ */
+const EMERGENCY_MIN_SIZE: SizeConstraint = { width: 24, height: 16 };
+
+/**
+ * Last-resort fallback (§10 / stress-lab "nothing fits" fix). Same geometry as
+ * `verticalStack`, but every `visibility:"always"` element's preferred AND min
+ * size are both replaced with `EMERGENCY_MIN_SIZE` — not just the acceptance
+ * floor, but the TARGET size — so each always-element claims only a small,
+ * fair share of space instead of greedily consuming everything available
+ * (which would just push the next always-element into the same "no room"
+ * cascade it was meant to rescue). Only `alwaysVisible` requests are touched;
+ * everything else keeps its normal preferred/min and cascades exactly as it
+ * would in `verticalStack`.
+ *
+ * The relaxed preferred/min is applied UNCONDITIONALLY to every always-visible
+ * element — not only when the normal size wouldn't fit — so this candidate's
+ * always-elements are deliberately tiny even on a perfectly spacious surface.
+ * That is what keeps it losing on every surface that never needed rescuing:
+ * `constraintViolationsScore` reads each element's REAL declared minSize from
+ * the graph node (unaffected by this override) and penalizes every
+ * always-element here as "forced below minSize," a penalty `vertical-stack`
+ * never carries when it can place things at their real size. Only when the
+ * other four candidates ALL hard-fail to 0 — because a surface can't fit an
+ * always-element even at its real, non-relaxed size — does this candidate's
+ * genuine, non-zero (if penalized) score become the highest, and win.
+ */
+function emergencyFit(requests: PlacementRequest[], box: Box): PlacementOutcome {
+  const relaxed = requests.map((r) =>
+    r.alwaysVisible
+      ? { ...r, preferred: EMERGENCY_MIN_SIZE, min: EMERGENCY_MIN_SIZE }
+      : r,
+  );
+  // Same growAxes as vertical-stack ({ width: true, height: false }) — this is
+  // deliberately vertical-stack's geometry PLUS the relaxed floor, not a
+  // second, differently-configured engine. Matching it exactly is what makes
+  // "resolves identically to vertical-stack when the floor never triggers"
+  // (asserted in candidates.test.ts) actually true, rather than an
+  // unrelated growth-setting difference accidentally changing the outcome
+  // even on surfaces with no emergency to handle.
+  return placeElementsInOrder(
+    relaxed,
+    box,
+    ({ placed }) => {
+      const cursorY = placed.reduce((maxY, e) => Math.max(maxY, e.y + e.height), box.y);
+      const remaining = box.y + box.height - cursorY;
+      if (remaining <= 0) return null;
+      return { x: box.x, y: cursorY, maxWidth: box.width, maxHeight: remaining };
+    },
+    { width: true, height: false },
+  );
+}
+
+/**
  * One row, elements placed left→right, each as tall as the box allows.
  * Mirror of verticalStack: HEIGHT is the free axis (every element sees the
  * full `box.height`), WIDTH is the cascading cursor-based axis and stays
@@ -499,8 +563,12 @@ function overlaySafeMargins(
  * Always returns all four strategies (≥ 3, as required) so the scorer has a
  * real choice. `context` biases the per-element size REQUESTS going in (far
  * viewing → bigger type, touch → bigger CTA — see `toRequest`); the four
- * strategy functions themselves stay pure geometry over whatever requests they
- * are handed, so no strategy needs to know why a request is the size it is.
+ * geometric strategy functions themselves stay pure geometry over whatever
+ * requests they are handed, so no strategy needs to know why a request is the
+ * size it is. A 5th, `emergency-fit`, is always generated too (cheap — same
+ * geometry as vertical-stack) but only ever WINS on surfaces where the other
+ * four all hard-fail because a `visibility:"always"` element couldn't be
+ * placed at its declared size at all (see `emergencyFit`).
  */
 export function generateCandidates(
   graph: ExperienceGraph,
@@ -524,5 +592,6 @@ export function generateCandidates(
     build("horizontal-split", horizontalSplit(requests, box)),
     build("grid", grid(requests, box)),
     build("overlay-safe-margins", overlaySafeMargins(requests, box)),
+    build("emergency-fit", emergencyFit(requests, box)),
   ];
 }
