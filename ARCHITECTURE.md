@@ -181,14 +181,11 @@ const ATTENTION_DEFAULT = "medium";  // when the surface declares no attentionWi
 | `hasAudio` | `audio === true` | defaults false — never assume audio is usable |
 | `allowsMotion` | `motion === true` | defaults false — never assume motion is usable |
 
-**How context currently biases downstream decisions:** `Context` is threaded
-through `generateCandidates` and `scoreCandidate` (stable signature), and is
-surfaced in the demo header (aspect / attention / touch / far). The scoring and
-placement math today is pure geometry plus each element's role / priority /
-declared minimums — `context` is accepted but not yet read by the scorer
-(`void context;` in both files). This is a deliberate, documented seam: the plumbing
-is in place so context-biased placement can be added without changing any
-signatures. See §10.
+**How context biases downstream decisions:** `Context` is threaded through
+`generateCandidates` and `scoreCandidate` and is surfaced in the demo header
+(aspect / attention / touch / far) — but it also genuinely changes both the
+element sizes requested (§4, "Context-aware sizing") and which strategy wins
+(§4, "contextFit sub-score").
 
 ---
 
@@ -226,15 +223,49 @@ if ((node.type === "text" || node.type === "button") && node.text !== undefined)
 }
 ```
 
+### Context-aware sizing (§4.3-context)
+
+After the base preferred size is computed (from `measureText`, `preferredSize`,
+or the fallback), `toRequest(node, context)` applies up to two more
+context-derived multipliers, in order, before the request is handed to a
+strategy:
+
+```ts
+const FAR_VIEWING_TEXT_SCALE = 1.3;  // legibility at a distance
+const TOUCH_TARGET_SCALE = 1.15;     // a genuinely bigger CTA, not just tap-target-legal
+
+if (context.isFarViewing && (node.type === "text" || node.type === "button")) {
+  preferred = { width: ceil(preferred.width * FAR_VIEWING_TEXT_SCALE), height: ceil(preferred.height * FAR_VIEWING_TEXT_SCALE) };
+}
+if (context.isTouchInteractive && node.interaction === "clickable") {
+  preferred = { width: ceil(preferred.width * TOUCH_TARGET_SCALE), height: ceil(preferred.height * TOUCH_TARGET_SCALE) };
+}
+```
+
+Only `text`/`button` elements inflate on far viewing — an `image`'s
+`preferredSize` already **is** its intended on-screen size, not a proxy for
+rendered type that should grow. Only `interaction: "clickable"` elements
+inflate on touch — this is what makes a phone's CTA visibly bigger than the
+same CTA on a remote-driven broadcast surface (§4.14), on top of whatever
+`surface.minTapTarget` already requires. `min` is never scaled — the
+advertiser's declared floor is unchanged, so a bigger *preferred* size only
+means the element is more likely to shrink or push out lower-priority content,
+never that a previously-valid layout becomes invalid. This is real on the
+sample ad: mobilePortrait's CTA (touch) is `230×65` instead of the
+undeclared-context `200×56`; broadcastLowerThird's headline (far-viewing) is
+`546×125` instead of `420×96` — verified live, not just asserted (see
+`candidates.test.ts`, "context-aware element sizing").
+
 ### ScoreBreakdown sub-scores and weights (quoted from `src/core/scoring.ts`)
 
 ```ts
 const WEIGHTS = {
-  constraintViolations: 0.35,
-  priorityPreservation: 0.3,
-  tapTargetCompliance: 0.15,
-  visualBalance: 0.12,
-  renderCost: 0.08,
+  constraintViolations: 0.32,
+  priorityPreservation: 0.28,
+  tapTargetCompliance: 0.14,
+  contextFit: 0.1,
+  visualBalance: 0.1,
+  renderCost: 0.06,
 } as const;                       // sum = 1
 
 const VIOLATION_PENALTY = 25;     // points off constraintViolations per soft violation
@@ -245,10 +276,36 @@ const EPS = 0.5;
 |---|---|
 | `constraintViolations` | `100 − 25 × (violation count)`, floored at 0. One violation per visible element that: sits outside the surface **safe area**; was forced below its spec `minSize`; is `brandRules.locked` but resized away from `preferredSize`; or is `interaction:"clickable"` but smaller than `surface.minTapTarget` on either axis. |
 | `priorityPreservation` | each node weighted `(maxPriority − priority + 1)` (priority 1 worth most); score = % of total weight still `visible`. |
-| `visualBalance` | `0.65 × centreScore + 0.35 × evenScore`. `centreScore` = how close the area-weighted centroid of visible elements is to the centre of the usable box (`1 − offset/halfDiagonal`). `evenScore` = `1 − min(coefficient of variation of element areas, 1)`. |
 | `tapTargetCompliance` | `100` if the surface has no `minTapTarget` or no interactive element is visible; else % of visible `clickable` elements meeting the minimum on **both** axes. |
+| `contextFit` | §4.3-context / §4.14 — see below. |
+| `visualBalance` | `0.65 × centreScore + 0.35 × evenScore`. `centreScore` = how close the area-weighted centroid of visible elements is to the centre of the usable box (`1 − offset/halfDiagonal`). `evenScore` = `1 − min(coefficient of variation of element areas, 1)`. |
 | `renderCost` | `rawCost = 5 × visibleCount + 20 × (1 − min(avgFrac × 4, 1))` where `avgFrac` = mean element area as a fraction of the usable box; `score = clamp(100 − rawCost, 0, 100)`. Fewer / larger elements are cheaper. |
 | `overall` | `Math.round(Σ subScore × weight)`, **or `0` on a hard-fail**. |
+
+#### contextFit sub-score (`contextFitScore`, `src/core/scoring.ts`)
+
+The direct answer to "how does context change *which layout wins*, not just
+how big things are drawn". Starts at a neutral `60` and applies named,
+independent bonuses/penalties — every one traceable to a specific `Context`
+flag, so a counterfactual explanation is never an opaque number:
+
+| rule | condition | effect |
+|---|---|---|
+| shape match | `aspectRatioClass: "wide"` | `+20` horizontal-split, `+10` grid, `−15` vertical-stack |
+| shape match | `aspectRatioClass: "tall"` | `+20` vertical-stack, `+5` grid, `−15` horizontal-split |
+| shape match | `aspectRatioClass: "square"` | `+10` grid or overlay-safe-margins |
+| quick glance | `attentionBudget: "short"` | `+` up to `20`, shrinking by `4` per visible element — rewards fewer, larger elements |
+| across the room | `isFarViewing` | `+` up to `12`, shrinking by `3` per visible element — same "fewer, larger" logic, passively |
+| thumb reach | `isTouchInteractive` and strategy is `overlay-safe-margins` | `−10` — spreading targets into the four corners is harder to reach than a stacked/split column |
+
+Result clamped to `[0, 100]`. Depends only on `candidate.strategy`, the
+candidate's visible-element count, and the (already-pure) `Context` — never on
+`surface`, so it is exactly as deterministic as every other sub-score
+(`scoring.test.ts` asserts this directly). This is what flipped
+broadcastLowerThird's winning strategy from `grid` to `horizontal-split` after
+this was added — a wide, far-viewing surface now genuinely prefers the
+strategy whose own geometry runs along the wide axis, not just whichever
+strategy happens to pack the most pixels.
 
 ### Hard-fail rule (quoted)
 
@@ -453,17 +510,20 @@ cross-check, not the scorer asserting about itself. Tiers:
 | metric | value |
 |---|---|
 | total | 200 |
-| passed | 106 |
-| degraded | 94 |
+| passed | 129 |
+| degraded | 71 |
 | **failed** | **0** |
-| robustness (passed / total) | **53.0%** |
+| robustness (passed / total) | **64.5%** |
 
-Repeated seeded/unseeded runs land in a **49–54%** "robustness" band and, in
-every run, **0 failed**. The number that matters for correctness is `failed = 0`:
-across 200 adversarial surfaces including `3840×2160` and `120×2000`, the
-hard-invariant guarantee from §4 held every time. The ~50% "robustness" figure is
-the *quality* bar (score ≥ 70), not a correctness bar — see §10 for why that
-metric is soft.
+Repeated unseeded runs land in a **62–68%** "robustness" band and, in every run,
+**0 failed**. This band moved up from the pre-`contextFit` **49–54%** band once
+§4.3-context started genuinely biasing which strategy wins (a context-suited
+strategy clears the 70-point quality bar more often) — a real, measured
+improvement, not a re-tuned threshold. The number that matters for correctness
+is `failed = 0`: across 200 adversarial surfaces including `3840×2160` and
+`120×2000`, the hard-invariant guarantee from §4 held every time. The
+robustness figure is the *quality* bar (score ≥ 70), not a correctness bar —
+see §10 for why that metric is soft.
 
 The unit test `stress-lab.test.ts` asserts `generateRandomSurfaces(50)` never
 throws and `runStressTest` on 200 surfaces produces **zero** "failed" entries.
@@ -481,41 +541,51 @@ The scenario deliberately triggers several failure modes at once:
 | headline string absurdly long for the surface | `text-measure.ts` measures the real rendered width; the placement engine shrinks it toward `minSize` and, if it still won't fit, the cascade drops lower-priority elements first — the headline (`visibility:"always"`, priority 1) is never dropped |
 | hero image `src` points at an unresolvable host (`https://invalid.invalid/…`) | the element keeps its layout slot; `SurfaceStage` swaps the `<img>` for a dashed placeholder box on `onError` — no broken-image glyph, no crash |
 | logo image has `src: ""` (no usable image at all) | rendered directly as a placeholder box, slot kept |
-| whole ad on a 240×260 touch panel | normal shrink-then-drop cascade (§5); logo (lowest priority) is dropped |
-| second locale swaps the CTA for a ~40%-longer German string | measured, not guessed; CTA shrinks 32% but stays visible |
+| whole ad on a 240×260 touch panel | normal shrink-then-drop cascade (§5), now picking `grid` — a square-ish, touch surface earns `grid` a `contextFit` bonus over `vertical-stack`, and packing 2-D fits all four elements where the old 1-D stack dropped the logo |
+| second locale swaps the CTA for a ~40%-longer German string | measured, not guessed, then touch-inflated on top (§4.3-context) |
 
 The demo shows the naive resolver's attempt (overlapping / clipped) beside the
 recovered layout, a brief *"Layout invalid — re-optimizing…"* beat, then the
 recovered result with the Phase 4 `LayoutDebugger` panel (reused verbatim) fed a
 trace whose per-element notes are augmented with the placeholder decisions.
 
-**Verified in the regression sweep:** `vertical-stack`, **3/4 elements visible**,
-CTA present at 240×56, logo dropped, hero shown as a placeholder box, zero
-overlaps. The resolver test asserts the self-healing scenario produces a layout
-with zero overlaps / out-of-bounds **and** `cta.visible === true` despite
-everything else going wrong.
+**Verified in the regression sweep (English locale):** `grid`, **4/4 elements
+visible** — headline shrunk 92% to 120×120, CTA shrunk 71% to a touch-inflated
+120×65 (from a measured 409×65 want), hero and logo both rendered as
+placeholder boxes in their slots, zero overlaps. Before `contextFit` existed,
+the same input resolved to `vertical-stack` with only 3/4 visible (logo
+dropped) — the context-aware strategy choice is a strictly better outcome here,
+not just a different one. The resolver test asserts the self-healing scenario
+produces a layout with zero overlaps / out-of-bounds **and**
+`cta.visible === true` despite everything else going wrong.
 
 ---
 
 ## 10. Limitations + what I'd improve with more time
 
-* **Context is plumbed but not yet consumed by scoring.** `scoreCandidate` and
-  the strategy functions take `Context` and immediately `void` it. Aspect /
-  attention / far-viewing / touch classifications are computed and displayed but
-  do not yet bias placement or scoring. Next step: e.g. weight `renderCost`
-  higher on `attentionBudget: "short"`, bias toward `horizontal-split` on
-  `aspectRatioClass: "wide"`, inflate the effective `minTextSize` on
-  `isFarViewing`.
-* **Candidate generation is 4 fixed strategies, not a search.** No parameter
-  sweep (gutters, alignment, orientation), no packing/bin-fit, no iterative
-  refinement of the winner. On some mid-size surfaces the best of four is only
-  "fine" — that is exactly the ~50% "degraded" band in the Stress Lab. A real
-  improvement would be a small local search seeded by the best strategy.
+* **`contextFit`'s bonus/penalty magnitudes are hand-chosen, not tuned.** The
+  `+20` / `−15` shape-match numbers and the scale factors (`1.3` far-viewing,
+  `1.15` touch) are reasoned, documented constants (§4), not the output of any
+  search or calibration against real ad performance data. They move the
+  Stress Lab's robustness band up by ~15 points in the expected direction,
+  which is evidence they point the right way, not proof they're optimal.
+* **Only two placement dimensions are context-scaled** (far-viewing text/button
+  size, touch CTA size). The plan also calls out `attentionWindow` changing
+  *which elements* appear at all (not just sizing) and richer touch affordances
+  (spacing, thumb-zone placement) — `contextFit`'s attention/far bonuses reward
+  a strategy for naturally dropping to fewer elements, but nothing forces that
+  outcome directly.
+* **Candidate generation is still 4 fixed strategies, not a search.** No
+  parameter sweep (gutters, alignment, orientation), no packing/bin-fit, no
+  iterative refinement of the winner. `contextFit` picks the best of four
+  context-suited candidates; it doesn't invent a fifth. That ceiling is the
+  remaining "degraded" band in the Stress Lab (§8).
 * **The "robustness" metric conflates quality with correctness.** `passed`
   requires `score ≥ 70`; true robustness (no hard invariant ever broken) is
-  effectively 100% across every run. The 53% headline number understates
-  correctness and overstates how often the layout is genuinely poor. I'd split
-  the metric into "invariant-safe %" (the real guarantee) and "quality %".
+  effectively 100% across every run regardless of the quality threshold. The
+  ~65% headline number still understates correctness and overstates how often
+  the layout is genuinely poor. I'd split the metric into "invariant-safe %"
+  (the real guarantee) and "quality %".
 * **Text measurement uses the Canvas `measureText()` API**, which is close to but
   not identical to the browser's final text layout (kerning, font fallback,
   sub-pixel rounding, `text-wrap: balance`). In the Vitest "node" environment

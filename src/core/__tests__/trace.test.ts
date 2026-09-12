@@ -4,7 +4,7 @@ import type { ScoreBreakdown } from "../scoring";
 
 /**
  * Build a ScoreBreakdown from partial sub-scores. `overall` defaults to the
- * arithmetic mean of the five sub-scores unless explicitly given — enough for
+ * arithmetic mean of the six sub-scores unless explicitly given — enough for
  * these tests, which only care about relative sub-score gaps.
  */
 function breakdown(partial: Partial<ScoreBreakdown>): ScoreBreakdown {
@@ -13,6 +13,7 @@ function breakdown(partial: Partial<ScoreBreakdown>): ScoreBreakdown {
     priorityPreservation: partial.priorityPreservation ?? 100,
     visualBalance: partial.visualBalance ?? 100,
     tapTargetCompliance: partial.tapTargetCompliance ?? 100,
+    contextFit: partial.contextFit ?? 100,
     renderCost: partial.renderCost ?? 100,
   };
   const overall =
@@ -22,8 +23,9 @@ function breakdown(partial: Partial<ScoreBreakdown>): ScoreBreakdown {
         sub.priorityPreservation +
         sub.visualBalance +
         sub.tapTargetCompliance +
+        sub.contextFit +
         sub.renderCost) /
-        5,
+        6,
     );
   return { ...sub, overall };
 }

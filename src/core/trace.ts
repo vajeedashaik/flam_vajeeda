@@ -56,7 +56,7 @@ export function buildTrace(
   };
 }
 
-/** The five weighted sub-scores, in the order the UI lists them. */
+/** The six weighted sub-scores, in the order the UI lists them. */
 const SUB_SCORES: {
   key: keyof Omit<ScoreBreakdown, "overall">;
   /** Plain-language name of the sub-score. */
@@ -83,6 +83,11 @@ const SUB_SCORES: {
     key: "tapTargetCompliance",
     label: "tap-target compliance",
     cause: "a tap target likely fell below the surface's minimum",
+  },
+  {
+    key: "contextFit",
+    label: "context fit",
+    cause: "its strategy or element count didn't suit this surface's aspect ratio, attention budget, or viewing distance",
   },
   {
     key: "renderCost",

@@ -27,7 +27,13 @@ export interface ScoreBreakdown {
   tapTargetCompliance: number;
   /** 0-100. 100 = cheapest to render (few, large elements). */
   renderCost: number;
-  /** Weighted sum of the five sub-scores, or 0 on a hard-fail. */
+  /**
+   * 0-100. §4.3-context: how well this candidate's STRATEGY and element count
+   * suit the derived context — aspect ratio, attention budget, far viewing,
+   * touch. See `contextFitScore` for the exact rule set.
+   */
+  contextFit: number;
+  /** Weighted sum of the six sub-scores, or 0 on a hard-fail. */
   overall: number;
 }
 
@@ -39,14 +45,18 @@ export interface ScoreBreakdown {
  * an undersized tap target) is the worst outcome short of the overlap /
  * out-of-bounds / priority-inversion HARD-fail. priorityPreservation is next —
  * dropping content is bad, but a shown-yet-awkward layout is usually
- * recoverable. renderCost is only a light tie-breaker.
+ * recoverable. contextFit sits below the hard constraints but above the light
+ * tie-breakers: it decides which of several otherwise-valid strategies suits
+ * THIS surface's real-world context, never whether a layout is valid at all.
+ * renderCost is only a light tie-breaker.
  */
 const WEIGHTS = {
-  constraintViolations: 0.35,
-  priorityPreservation: 0.3,
-  tapTargetCompliance: 0.15,
-  visualBalance: 0.12,
-  renderCost: 0.08,
+  constraintViolations: 0.32,
+  priorityPreservation: 0.28,
+  tapTargetCompliance: 0.14,
+  contextFit: 0.1,
+  visualBalance: 0.1,
+  renderCost: 0.06,
 } as const;
 
 /** Points removed from constraintViolations per soft violation found. */
@@ -288,6 +298,61 @@ function renderCostScore(candidate: Candidate, surface: SurfaceProfile): number 
   return Math.max(0, Math.min(100, Math.round(100 - rawCost)));
 }
 
+/** Neutral starting point before any context bonus/penalty is applied. */
+const CONTEXT_FIT_BASE = 60;
+
+/**
+ * contextFit sub-score — §4.3-context, the direct answer to "how does context
+ * change which layout wins, not just how big things are drawn".
+ *
+ * Every bonus/penalty below is a named rule tied to one Context flag, so a
+ * counterfactual explanation ("scored lower on context fit") is always
+ * traceable back to a specific real-world reason, never an opaque number:
+ *
+ *  - aspectRatioClass: reward the strategy whose own geometry matches the
+ *    surface's shape (wide → horizontal-split/grid, tall → vertical-stack,
+ *    square → grid/overlay), penalise the strategy that fights the shape.
+ *  - attentionBudget "short" / isFarViewing: reward FEWER visible elements —
+ *    "prioritise instant visual comprehension" for a quick glance or a
+ *    billboard read from across a room, exactly the project brief's own
+ *    phrasing.
+ *  - isTouchInteractive: penalise overlay-safe-margins, which spreads targets
+ *    into the four corners — harder for a thumb to reach than a stacked or
+ *    split layout keeps them.
+ *
+ * Pure and deterministic: depends only on the candidate's strategy + visible
+ * count and the (already-pure) Context object.
+ */
+function contextFitScore(candidate: Candidate, context: Context): number {
+  let score = CONTEXT_FIT_BASE;
+  const strategy = candidate.strategy;
+
+  if (context.aspectRatioClass === "wide") {
+    if (strategy === "horizontal-split") score += 20;
+    else if (strategy === "grid") score += 10;
+    else if (strategy === "vertical-stack") score -= 15;
+  } else if (context.aspectRatioClass === "tall") {
+    if (strategy === "vertical-stack") score += 20;
+    else if (strategy === "grid") score += 5;
+    else if (strategy === "horizontal-split") score -= 15;
+  } else {
+    if (strategy === "grid" || strategy === "overlay-safe-margins") score += 10;
+  }
+
+  const visibleCount = visible(candidate).length;
+  if (context.attentionBudget === "short") {
+    score += Math.max(0, 20 - visibleCount * 4);
+  }
+  if (context.isFarViewing) {
+    score += Math.max(0, 12 - visibleCount * 3);
+  }
+  if (context.isTouchInteractive && strategy === "overlay-safe-margins") {
+    score -= 10;
+  }
+
+  return Math.max(0, Math.min(100, Math.round(score)));
+}
+
 /**
  * Score one candidate layout. Pure: same inputs → same output.
  *
@@ -302,8 +367,6 @@ export function scoreCandidate(
   context: Context,
   surface: SurfaceProfile,
 ): ScoreBreakdown {
-  void context;
-
   const byId = nodesById(graph);
   const vis = visible(candidate);
 
@@ -313,6 +376,7 @@ export function scoreCandidate(
     visualBalance: visualBalanceScore(candidate, surface),
     tapTargetCompliance: tapTargetComplianceScore(candidate, byId, surface),
     renderCost: renderCostScore(candidate, surface),
+    contextFit: contextFitScore(candidate, context),
   };
 
   const hardFail =
@@ -326,6 +390,7 @@ export function scoreCandidate(
     sub.constraintViolations * WEIGHTS.constraintViolations +
     sub.priorityPreservation * WEIGHTS.priorityPreservation +
     sub.tapTargetCompliance * WEIGHTS.tapTargetCompliance +
+    sub.contextFit * WEIGHTS.contextFit +
     sub.visualBalance * WEIGHTS.visualBalance +
     sub.renderCost * WEIGHTS.renderCost;
 

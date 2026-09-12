@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { generateCandidates, type Candidate, type CandidateStrategy } from "../candidates";
 import { buildGraph } from "../graph";
-import { resolveContext } from "../context";
+import { resolveContext, type Context } from "../context";
+import { defineSurface, type SurfaceProfile } from "../surfaces";
 import { productAd, surfaceProfiles } from "../sample-data";
 
 const ALL_STRATEGIES: CandidateStrategy[] = [
@@ -77,4 +78,40 @@ describe("generateCandidates", () => {
       expect(rowYs.length - distinctRows.size).toBeGreaterThanOrEqual(1);
     });
   }
+});
+
+describe("generateCandidates — context-aware element sizing (§4.3-context)", () => {
+  // Deliberately oversized so nothing has to shrink — isolates the size REQUEST
+  // context produces from the placement engine's fit/shrink/drop behaviour.
+  const spaciousSurface: SurfaceProfile = defineSurface({
+    id: "context-size-test-surface",
+    width: 4000,
+    height: 4000,
+  });
+  const baseContext = resolveContext(spaciousSurface);
+
+  function widthOf(context: Context, id: string): number {
+    const cands = generateCandidates(graph, context, spaciousSurface);
+    return strat(cands, "vertical-stack").elements.find((e) => e.id === id)!
+      .width;
+  }
+
+  it("far viewing inflates text/button preferred size (bigger type read from across a room)", () => {
+    const near: Context = { ...baseContext, isFarViewing: false };
+    const far: Context = { ...baseContext, isFarViewing: true };
+
+    expect(widthOf(far, "headline")).toBeGreaterThan(widthOf(near, "headline"));
+    expect(widthOf(far, "cta")).toBeGreaterThan(widthOf(near, "cta"));
+    // product-image is type "image" — its own preferred size already IS the
+    // intended on-screen size, so far-viewing must NOT inflate it.
+    expect(widthOf(far, "product-image")).toBe(widthOf(near, "product-image"));
+  });
+
+  it("touch interactivity inflates the clickable CTA but leaves the static headline alone", () => {
+    const notTouch: Context = { ...baseContext, isTouchInteractive: false };
+    const touch: Context = { ...baseContext, isTouchInteractive: true };
+
+    expect(widthOf(touch, "cta")).toBeGreaterThan(widthOf(notTouch, "cta"));
+    expect(widthOf(touch, "headline")).toBe(widthOf(notTouch, "headline"));
+  });
 });

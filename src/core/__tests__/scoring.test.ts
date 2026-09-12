@@ -76,3 +76,75 @@ describe("scoreCandidate", () => {
     expect(scoreCandidate(cleanCandidate(), graph, ctx, surface).overall).toBeGreaterThan(0);
   });
 });
+
+describe("scoreCandidate — contextFit (§4.3-context)", () => {
+  it("rewards horizontal-split over vertical-stack on a wide surface, all else equal", () => {
+    const wideSurface = surfaceProfiles.broadcastLowerThird;
+    const wideCtx = resolveContext(wideSurface);
+    expect(wideCtx.aspectRatioClass).toBe("wide");
+
+    const vertical: Candidate = { ...cleanCandidate(), strategy: "vertical-stack" };
+    const horizontal: Candidate = { ...cleanCandidate(), strategy: "horizontal-split" };
+
+    const vScore = scoreCandidate(vertical, graph, wideCtx, wideSurface);
+    const hScore = scoreCandidate(horizontal, graph, wideCtx, wideSurface);
+
+    expect(hScore.contextFit).toBeGreaterThan(vScore.contextFit);
+  });
+
+  it("rewards vertical-stack over horizontal-split on a tall surface, all else equal", () => {
+    const tallSurface = surfaceProfiles.retailKiosk;
+    const tallCtx = resolveContext(tallSurface);
+    expect(tallCtx.aspectRatioClass).toBe("tall");
+
+    const vertical: Candidate = { ...cleanCandidate(), strategy: "vertical-stack" };
+    const horizontal: Candidate = { ...cleanCandidate(), strategy: "horizontal-split" };
+
+    const vScore = scoreCandidate(vertical, graph, tallCtx, tallSurface);
+    const hScore = scoreCandidate(horizontal, graph, tallCtx, tallSurface);
+
+    expect(vScore.contextFit).toBeGreaterThan(hScore.contextFit);
+  });
+
+  it("rewards fewer visible elements under a short attention budget, strategy held constant", () => {
+    const shortAttentionSurface = surfaceProfiles.mobilePortrait; // attentionWindow: 3s
+    const shortCtx = resolveContext(shortAttentionSurface);
+    expect(shortCtx.attentionBudget).toBe("short");
+
+    const twoVisible: Candidate = {
+      strategy: "vertical-stack",
+      notes: [],
+      elements: [
+        vis("headline", "primary", 48, 48, 420, 96),
+        vis("cta", "action", 48, 160, 200, 64),
+        dropped("product-image", "hero"),
+        dropped("price", "secondary"),
+        dropped("logo", "branding"),
+      ],
+    };
+    const fourVisible: Candidate = {
+      strategy: "vertical-stack",
+      notes: [],
+      elements: [
+        vis("headline", "primary", 48, 48, 420, 96),
+        vis("cta", "action", 48, 160, 200, 64),
+        vis("product-image", "hero", 48, 240, 480, 480),
+        vis("price", "secondary", 48, 730, 64, 24),
+        dropped("logo", "branding"),
+      ],
+    };
+
+    const fewerScore = scoreCandidate(twoVisible, graph, shortCtx, shortAttentionSurface);
+    const moreScore = scoreCandidate(fourVisible, graph, shortCtx, shortAttentionSurface);
+
+    expect(fewerScore.contextFit).toBeGreaterThan(moreScore.contextFit);
+  });
+
+  it("is not affected by surface geometry — only strategy, visible count, and context", () => {
+    // Same candidate, same context-derived flags, two different surfaces: the
+    // contextFit sub-score must be identical because it never reads `surface`.
+    const a = scoreCandidate(cleanCandidate(), graph, ctx, surfaceProfiles.retailKiosk);
+    const b = scoreCandidate(cleanCandidate(), graph, ctx, surfaceProfiles.printQRPanel);
+    expect(a.contextFit).toBe(b.contextFit);
+  });
+});

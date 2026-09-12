@@ -31,7 +31,7 @@ Requires Node 18+.
 ```bash
 npm install       # install dependencies
 npm run dev       # start the Vite dev server (http://localhost:5173)
-npm run test      # run the full Vitest suite (80 tests)
+npm run test      # run the full Vitest suite (86 tests)
 npm run build     # type-check (tsc --noEmit) + production build to dist/
 npm run preview   # serve the production build locally (http://localhost:4173)
 ```
@@ -64,7 +64,7 @@ build) and open the page. A top nav bar switches between views:
     badged "CHOSEN"; click a losing strategy to see a generated sentence naming
     the sub-score it lost on and by how many points.
   - **Layout Health Check** — a pass / warn / fail checklist derived from the
-    winning candidate's five sub-scores.
+    winning candidate's six sub-scores (including `contextFit`).
 - **Side-by-side (5.3)** — all 5 sample surfaces resolved at once, each in a
   plain device-style frame, each the real resolved layout (not a mockup). The
   fastest way to see that the layouts genuinely differ.
@@ -109,16 +109,17 @@ feature numbers (`§4.x`).
 | Experience Graph (`buildGraph`) | Derives proximity/exclusion edges from role semantics with a deterministic, id-agnostic rule set | Constraint resolution algorithm (35%); §4.1 semantic layout graph |
 | Importance / survival tiers | `importance` (`critical`/`should-survive`/`nice-to-have`) + `visibility` (`always`/`degradable`/`decorative-only`) layered on numeric priority | Constraint resolution algorithm (35%); §4.2 |
 | Context Engine (`resolveContext`) | Normalizes surface constraints (aspect, touch, far-viewing, attention budget, audio, motion) into qualitative flags with documented thresholds | Constraint resolution algorithm (35%); §4.3-context |
+| Context-aware sizing + strategy bias | Far-viewing text/buttons and touch-surface CTAs request genuinely bigger sizes (§4.3-context); a `contextFit` sub-score rewards the strategy whose geometry matches the surface's aspect ratio and rewards fewer visible elements under a short attention budget or far viewing | Constraint resolution algorithm (35%); §4.3-context, §4.14 |
 | Candidate generation (4 strategies) | vertical-stack / horizontal-split / grid / overlay-safe-margins, all through one shared priority-ordered placement engine | Constraint resolution algorithm (35%); Layout correctness (25%); §4.3 |
-| Deterministic fitness scoring | 5 weighted sub-scores + hard-fail-to-0 rule for overlap / out-of-bounds / dropped-always / priority-inversion; pure function | Constraint resolution algorithm (35%); Code quality (10%); §4.3 |
+| Deterministic fitness scoring | 6 weighted sub-scores + hard-fail-to-0 rule for overlap / out-of-bounds / dropped-always / priority-inversion; pure function | Constraint resolution algorithm (35%); Code quality (10%); §4.3 |
 | Performance-aware scoring term | `renderCost` sub-score (element count + mean size) breaks near-ties toward cheaper-to-render layouts | Constraint resolution algorithm (35%); §4.9 |
 | Lightweight declarative constraints | safeArea, `minSize`, `minTapTarget`, `brandRules.locked` are declared on the spec/surface and read by the scorer — not hardcoded in the resolver | TypeScript & architecture (20%); §4.4 / §4.6 |
 | Priority degradation cascade | Shrink toward minSize, then drop lowest-priority-first in a strict monotone cascade; `visibility:"always"` elements never dropped | Constraint resolution algorithm (35%); core req: "priority-based degradation, not overlap/clip"; §4.5 |
 | Decision trace + Layout Debugger panel | Per-element plain-language reasoning ("shrunk 7%", "dropped — priority 5…") updating live on surface change | Code quality (10%); §4.7 |
 | Layout Counterfactuals panel | Every candidate + score; click a loser for a generated sentence naming the sub-score gap (`explainLoss`) | Code quality (10%); §4.7b |
-| Layout Health Check panel | Pass/warn/fail checklist derived from the same 5 sub-scores | Code quality (10%); Example application (10%); §4.7c |
+| Layout Health Check panel | Pass/warn/fail checklist derived from the same 6 sub-scores | Code quality (10%); Example application (10%); §4.7c |
 | Side-by-side multi-surface view | All 5 surfaces resolved and rendered at once in device-style frames | Layout correctness across surfaces (25%); §4.16 |
-| Stress Lab | 200 randomized surfaces incl. extremes; tiered pass/degraded/failed; **0 failed every run** | Layout correctness across surfaces (25%); §4.10 |
+| Stress Lab | 200 randomized surfaces incl. extremes; tiered pass/degraded/failed; **0 failed every run**; ~65% robustness | Layout correctness across surfaces (25%); §4.10 |
 | Self-healing demo | Recovers from long text + broken images + tiny surface + translated copy simultaneously | Layout correctness (25%); §4.13; official bonus "text-measurement-aware layout" |
 | Real text measurement (`text-measure.ts`) | Canvas `measureText()` for the true rendered width of long / translated strings; node fallback preserves ordering | Constraint resolution algorithm (35%); official bonus "text-measurement-aware layout"; §4.13 / §4.17 |
 | Naive-vs-smart comparison | The real output beside a deliberately dumb uniform-scaling resolver | Example application (10%); §4.19 (proves it is not "uniform scaling passed off as adaptation") |
@@ -132,15 +133,19 @@ feature numbers (`§4.x`).
 Real, specific to what was built (more technical depth in
 [ARCHITECTURE.md §10](ARCHITECTURE.md#10-limitations--what-id-improve-with-more-time)):
 
-- **Context is computed and displayed but does not yet bias scoring.**
-  `scoreCandidate` and the strategy functions receive the `Context` object and
-  currently `void` it. The classifications are correct and shown in the UI, but
-  aspect / attention / far-viewing do not yet change placement or scores.
+- **`contextFit`'s bonus/penalty sizes are reasoned, not tuned.** Context now
+  genuinely changes element sizing (far-viewing text, touch CTAs) and which
+  strategy wins (a `contextFit` sub-score rewards aspect-matched strategies and
+  fewer visible elements under a short attention budget or far viewing) — see
+  [ARCHITECTURE.md §4](ARCHITECTURE.md#4-candidate-generation--scoring). The
+  exact magnitudes (`+20`/`−15` shape bonuses, `1.3×`/`1.15×` size scales) are
+  hand-chosen constants, not calibrated against real ad performance data.
 - **Candidate generation is 4 fixed strategies, not an exhaustive search.** No
-  parameter sweep, no packing algorithm, no refinement of the winner. On some
-  mid-size surfaces the best of four is only adequate — that is the ~50%
-  "degraded" band in the Stress Lab.
-- **The Stress Lab "robustness" number (~50%) is a quality bar, not a
+  parameter sweep, no packing algorithm, no refinement of the winner.
+  `contextFit` picks the best-suited of four; it doesn't invent a fifth. On
+  some mid-size surfaces the best of four is only adequate — that is the
+  remaining "degraded" band in the Stress Lab.
+- **The Stress Lab "robustness" number (~65%) is a quality bar, not a
   correctness bar.** "passed" means score ≥ 70. Hard-invariant safety (no
   overlap / clip / dropped-always, ever) held on 100% of surfaces in every run;
   "failed" is always 0. The headline percentage understates correctness.
@@ -202,18 +207,18 @@ through), or **Skipped**.
 |---|---|---|---|
 | 4.1 | Semantic layout graph (typed relational edges) | **Implemented** | proximity + exclusion edges derived from roles; `alignment` typed but not derived; edges not yet read by placement |
 | 4.2 | Importance / survival tiers | **Implemented** | `importance` + `visibility` unions; `visibility:"always"` enforced as a hard-fail in scoring |
-| 4.3 | Candidate generation + deterministic fitness scoring | **Implemented** | 4 strategies, 5 weighted sub-scores, hard-fail rule, determinism test |
-| 4.3-context | Context-aware adaptation | **Partial** | context is computed and displayed; it is threaded into scoring's signature but not yet read (`void context`) — placement is geometry-only so far |
+| 4.3 | Candidate generation + deterministic fitness scoring | **Implemented** | 4 strategies, 6 weighted sub-scores, hard-fail rule, determinism test |
+| 4.3-context | Context-aware adaptation | **Implemented** | far-viewing inflates text/button preferred size, touch inflates the clickable CTA (candidates.ts); a `contextFit` sub-score rewards the aspect-matched strategy and fewer visible elements under short attention / far viewing (scoring.ts) — composition strategy itself changes, not just sizes (verified: broadcastLowerThird's winner flips from `grid` to `horizontal-split`) |
 | 4.4 | Lightweight declarative constraint rules | **Implemented** | safeArea / minSize / minTapTarget / brandRules read by the scorer, declared on spec+surface |
 | 4.5 | Graceful degradation engine | **Implemented** | strict priority-monotone shrink→drop cascade; documented in ARCHITECTURE §5 |
 | 4.6 | Brand-safe adaptation | **Partial** | `brandRules.locked` + brand `minSize` are honoured as a `constraintViolations` penalty; not every advertiser rule from the plan (e.g. `product.mustStayDominant`, `headline.canWrapNotTruncate`) is modelled |
 | 4.7 | Layout Debugger | **Implemented** | live per-element decision-trace panel |
 | 4.7b | Layout Counterfactuals | **Implemented** | click a losing candidate → `explainLoss()` names the largest sub-score gap and the point delta |
-| 4.7c | Layout Health Check | **Implemented** | pass/warn/fail checklist on the 5 sub-scores |
-| 4.9 | Performance-aware composition | **Implemented** | `renderCost` sub-score (weight 0.08) as a tie-breaker inside the same fitness function |
-| 4.10 | Automated stress testing ("Stress Lab") | **Implemented** | 200 randomized surfaces, tiered pass/degraded/failed, click-through inspection; 0 failed every run |
-| 4.13 | Self-healing / fault-tolerant layout (combined stressors) | **Implemented** | long headline + invalid hero src + missing logo src + tiny surface + longer German CTA, all at once; recovers with CTA kept |
-| 4.14 | Interactive vs. passive layout strategy | **Partial** | interaction/viewing context is classified and shown, but does not yet change the composition strategy (same limitation as 4.3-context) |
+| 4.7c | Layout Health Check | **Implemented** | pass/warn/fail checklist on the 6 sub-scores |
+| 4.9 | Performance-aware composition | **Implemented** | `renderCost` sub-score (weight 0.06) as a tie-breaker inside the same fitness function |
+| 4.10 | Automated stress testing ("Stress Lab") | **Implemented** | 200 randomized surfaces, tiered pass/degraded/failed, click-through inspection; 0 failed every run; robustness moved from ~50% to ~65% once `contextFit` shipped |
+| 4.13 | Self-healing / fault-tolerant layout (combined stressors) | **Implemented** | long headline + invalid hero src + missing logo src + tiny surface + longer German CTA, all at once; recovers with CTA kept (now via `grid`, 4/4 visible — `contextFit`'s square-aspect bonus improved on the pre-fix `vertical-stack`, 3/4 visible) |
+| 4.14 | Interactive vs. passive layout strategy | **Implemented** | touch surfaces get a genuinely bigger CTA (candidates.ts sizing) and `contextFit` penalizes `overlay-safe-margins` (corner-spread targets) under touch; far-viewing/short-attention surfaces reward strategies that keep fewer, larger elements visible |
 | 4.16 | Side-by-side multi-surface view | **Implemented** | all 5 surfaces at once in phone/wide/square frames, each a real resolved layout |
 | 4.17 | Language-aware adaptation | **Implemented** (scoped) | self-healing demo has an EN/DE locale toggle; the longer German CTA is measured and re-resolved rather than overflowing |
 | 4.18 | Live degradation slider | **Implemented** | width/height sliders re-run the real resolver on every change |
@@ -255,7 +260,7 @@ src/
     self-healing-scenario.ts adversarial spec + tiny surface (5.2)
     render-dom.ts            deliberate stub (framework-agnostic renderer seam)
     spec.invalid-example.ts.txt   compile-error demonstration (excluded from build)
-    __tests__/               11 Vitest suites, 80 tests
+    __tests__/               11 Vitest suites, 86 tests
   components/
     SurfaceStage.tsx         the one ResolvedLayout → pixels renderer
     LayoutDebugger.tsx       explainability panel 1

@@ -25,6 +25,21 @@ import { measureTextWidth } from "./text-measure";
 const DEFAULT_FONT_SIZE = 16;
 const LINE_HEIGHT_FACTOR = 1.3;
 
+/**
+ * §4.3-context: far-viewing surfaces need bigger type to stay legible from
+ * across a room, so text/button elements ask for more room up front — which in
+ * turn makes them more likely to shrink or push out lower-priority content, the
+ * "fewer, larger elements" behaviour the project plan calls for on a billboard.
+ */
+const FAR_VIEWING_TEXT_SCALE = 1.3;
+
+/**
+ * §4.3-context / §4.14: a touch-only surface needs a genuinely bigger CTA, not
+ * just one that clears the tap-target floor — this is what "larger CTA,
+ * interactive affordances" means for a phone versus a remote-driven TV.
+ */
+const TOUCH_TARGET_SCALE = 1.15;
+
 export type CandidateStrategy =
   | "vertical-stack"
   | "horizontal-split"
@@ -95,7 +110,7 @@ interface PlacementRequest {
   min: SizeConstraint;
 }
 
-function toRequest(node: GraphNode): PlacementRequest {
+function toRequest(node: GraphNode, context: Context): PlacementRequest {
   let preferred = node.preferredSize ?? node.minSize ?? FALLBACK_PREFERRED;
 
   // Phase 5: when a text/button element carries its literal string, size it from
@@ -118,6 +133,26 @@ function toRequest(node: GraphNode): PlacementRequest {
     };
   }
 
+  // §4.3-context: far-viewing legibility. Only text/button carry rendered type,
+  // so only they inflate — an image's preferred size already IS its intended
+  // on-screen size, not a proxy for something else that should grow.
+  if (context.isFarViewing && (node.type === "text" || node.type === "button")) {
+    preferred = {
+      width: Math.ceil(preferred.width * FAR_VIEWING_TEXT_SCALE),
+      height: Math.ceil(preferred.height * FAR_VIEWING_TEXT_SCALE),
+    };
+  }
+
+  // §4.3-context / §4.14: touch surfaces ask for a bigger interactive target,
+  // not just the surface-declared floor — this is what makes a phone CTA
+  // visibly more prominent than the same CTA on a remote-driven broadcast.
+  if (context.isTouchInteractive && node.interaction === "clickable") {
+    preferred = {
+      width: Math.ceil(preferred.width * TOUCH_TARGET_SCALE),
+      height: Math.ceil(preferred.height * TOUCH_TARGET_SCALE),
+    };
+  }
+
   const min = node.minSize ?? preferred;
   return {
     id: node.id,
@@ -129,13 +164,16 @@ function toRequest(node: GraphNode): PlacementRequest {
 }
 
 /** Canonical resolution order: priority ascending, id ascending to break ties. */
-function orderedRequests(graph: ExperienceGraph): PlacementRequest[] {
+function orderedRequests(
+  graph: ExperienceGraph,
+  context: Context,
+): PlacementRequest[] {
   return [...graph.nodes]
     .sort((a, b) => {
       if (a.priority !== b.priority) return a.priority - b.priority;
       return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
     })
-    .map(toRequest);
+    .map((node) => toRequest(node, context));
 }
 
 /**
@@ -337,18 +375,18 @@ function overlaySafeMargins(
  * Build every candidate layout for a (graph, context, surface).
  *
  * Always returns all four strategies (≥ 3, as required) so the scorer has a
- * real choice. `context` is accepted for a stable signature and future
- * context-biased placement; the strategies today are pure geometry.
+ * real choice. `context` biases the per-element size REQUESTS going in (far
+ * viewing → bigger type, touch → bigger CTA — see `toRequest`); the four
+ * strategy functions themselves stay pure geometry over whatever requests they
+ * are handed, so no strategy needs to know why a request is the size it is.
  */
 export function generateCandidates(
   graph: ExperienceGraph,
   context: Context,
   surface: SurfaceProfile,
 ): Candidate[] {
-  void context;
-
   const box = availableBox(surface);
-  const requests = orderedRequests(graph);
+  const requests = orderedRequests(graph, context);
 
   const build = (
     strategy: CandidateStrategy,
