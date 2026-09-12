@@ -384,7 +384,9 @@ export function computeAdjacencyFit(
  *
  * ALGORITHM
  *  1. Fewer than 2 visible elements → nothing can be "scattered apart from
- *     something else" → neutral 100.
+ *     something else" → neutral 100 (priorityPreservation already fully
+ *     covers "too little survived" on its own axis; this sub-score has
+ *     nothing geometric to say about 0-1 elements).
  *  2. Compute the smallest axis-aligned bounding box that encloses every
  *     VISIBLE element (their union's bounding box) — this is the footprint
  *     the ad as a whole actually occupies.
@@ -400,8 +402,23 @@ export function computeAdjacencyFit(
  *     void in the middle" complaint. A tightly stacked or efficiently packed
  *     composition has a footprint close to its own content area, so density
  *     approaches 1.
- *  4. Score = `round(min(1, density) × 100)`. No unexplained magic numbers —
- *     a plain content-area-to-footprint ratio.
+ *  4. coverage = (visible count) / (total element count in this candidate).
+ *     BUG FOUND VIA LIVE TESTING: density alone is gameable — a candidate
+ *     that DROPS elements shrinks its own footprint along with them, which
+ *     can make it score a HIGHER density than a candidate that keeps every
+ *     element visible but necessarily spans a bit more room. On a wide-but-
+ *     short surface this let a cascading strategy silently drop lower-
+ *     priority content (e.g. price and the logo) and out-score a strategy
+ *     that kept everything visible, because "fewer things packed tighter"
+ *     measured as denser than "everything shown, slightly looser" — exactly
+ *     backwards from what a real ad should do. Multiplying by coverage closes
+ *     that loophole: dropping content can no longer buy a density win for
+ *     free, while two candidates with the SAME visible count (the actual
+ *     "scattered corners vs. clustered" comparison this sub-score exists for)
+ *     are compared on density exactly as before, unchanged.
+ *  5. Score = `round(min(1, density) × coverage × 100)`. No unexplained magic
+ *     numbers — a plain content-area-to-footprint ratio, scaled by how much
+ *     of the ad is even present.
  *
  * Pure and deterministic: depends only on the candidate's own placed
  * geometry — no graph, no surface, no context.
@@ -418,8 +435,9 @@ export function computeCompositionCohesion(candidate: Candidate): number {
   const footprintArea = (maxX - minX) * (maxY - minY) || 1;
   const contentArea = vis.reduce((sum, e) => sum + e.width * e.height, 0);
   const density = Math.min(1, contentArea / footprintArea);
+  const coverage = vis.length / candidate.elements.length;
 
-  return Math.round(density * 100);
+  return Math.round(density * coverage * 100);
 }
 
 /**
