@@ -602,6 +602,15 @@ produces a layout with zero overlaps / out-of-bounds **and**
 * **`overlay-safe-margins` silently caps at 4 elements** (four corners). For a
   5-element spec it always drops the 5th, so it rarely wins on the sample ad —
   acceptable as one of four options, but it is not a general strategy.
-* **No persistence / no real ad content.** Specs and surfaces are code-defined
-  sample data; the demo renders role-tinted boxes, not real copy or imagery
-  (except the deliberately-broken self-healing images).
+* **No persistence / one hardcoded product.** The sample ad (DIOR Backstage
+  Rosy Glow Stick, real photo + copy, styled as a Nykaa PDP ad) and surfaces
+  are code-defined, not loaded from any catalog or CMS — swapping products
+  means editing `sample-data.ts` by hand.
+* **Font-fit is a single-pass approximation, not exact.** `SurfaceStage`'s
+  `fitFontSize` scales a text element's font size by `boxHeight /
+  wrappedBlockHeight` in one shot (reusing `measureTextBlock`) rather than
+  iterating to convergence — since narrower glyphs at a smaller font can
+  re-wrap into fewer lines than the first estimate assumed, the fitted size is
+  occasionally a shade more conservative (smaller) than the true optimum, never
+  larger. Purely cosmetic: it never touches the resolved `x/y/width/height`
+  the resolver actually guarantees non-overlapping.
