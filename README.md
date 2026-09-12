@@ -31,7 +31,7 @@ Requires Node 18+.
 ```bash
 npm install       # install dependencies
 npm run dev       # start the Vite dev server (http://localhost:5173)
-npm run test      # run the full Vitest suite (98 tests)
+npm run test      # run the full Vitest suite (106 tests)
 npm run build     # type-check (tsc --noEmit) + production build to dist/
 npm run preview   # serve the production build locally (http://localhost:4173)
 ```
@@ -50,11 +50,23 @@ build) and open the page. A top nav bar switches between views:
   resolved layout renders at true aspect ratio, scaled to fit. Below the header
   you see the winning strategy, how many elements stayed visible, and the derived
   context flags (aspect / attention / touch / far).
+  - **Device frame** dropdown (Auto / Clean / Phone / TV) wraps the same
+    `SurfaceStage` render in a realistic chassis — Auto picks by aspect ratio
+    alone (never a surface-id lookup). **TV** pillarboxes any surface narrower
+    than a real TV's own landscape shape (dark bars either side) instead of
+    shrink-wrapping the chassis into an un-TV-like tall column.
+  - **Debug: on/off** overlays a dashed safe-area outline plus a colored,
+    labeled bounding box per element — green border for placed-as-wanted,
+    amber for shrunk — reusing the exact strings the Layout Debugger panel
+    already shows.
 - **Degradation slider** — sits directly under the single-surface layout. Two
   sliders live-shrink the selected surface's width and height; the **real**
   resolver re-runs on every change, so you watch elements shrink and then drop in
   priority order (e.g. 5/5 → 4/5 → 2/5 as the print panel goes from 620×874 down
-  to 240×200).
+  to 240×200). **Fluid Stress Test** (button next to the slider heading)
+  automates the same thing — an out-of-phase sin/cos oscillation continuously
+  sweeps width and height through a full range of aspect ratios so you can
+  watch the resolver re-adapt every frame without dragging anything.
 - **Explainability panels** (under the single-surface view, updating live on
   every surface change):
   - **Layout Debugger** — the per-element decision trace ("headline: wanted
@@ -71,9 +83,12 @@ build) and open the page. A top nav bar switches between views:
 - **Stress Lab (5.1)** — click **Run Stress Test** to generate 200 randomized
   surfaces (dimensions from 100×600 to 3840×2160, random constraint mixes), run
   the real pipeline against every one, and report passed / degraded / failed
-  counts plus a robustness percentage. The degraded/failed entries are listed;
-  click one to load that exact surface into the single-surface view for
-  inspection with the panels above.
+  counts plus a robustness percentage. A **Conclusion** section buckets every
+  degraded/failed entry by root cause (not just count) — see
+  [ARCHITECTURE.md §8](ARCHITECTURE.md#8-stress-test-methodology--results) —
+  and each row below it is tagged with the same category. Click any entry to
+  load that exact surface into the single-surface view for inspection with the
+  panels above.
 - **Self-Healing (5.2)** — click **Load broken scenario** to run a deliberately
   adversarial spec (absurdly long headline, invalid hero image src, missing logo
   src, tiny 240×260 touch surface, optional longer German CTA). Shows the naive
@@ -131,6 +146,9 @@ feature numbers (`§4.x`).
 | Real text measurement (`text-measure.ts`) | Canvas `measureText()` for the true rendered width of long / translated strings; node fallback preserves ordering | Constraint resolution algorithm (35%); official bonus "text-measurement-aware layout"; §4.13 / §4.17 |
 | Naive-vs-smart comparison | The real output beside a deliberately dumb uniform-scaling resolver | Example application (10%); §4.19 (proves it is not "uniform scaling passed off as adaptation") |
 | Degradation slider | Live re-resolve as the surface shrinks; watch shrink→drop in order | Example application (10%); §4.18 |
+| Fluid Stress Test | Continuous out-of-phase sin/cos oscillation of width/height, sweeping every aspect ratio automatically instead of manual dragging | Example application (10%); Layout correctness (25%) |
+| Device frame (Auto/Clean/Phone/TV) | Wraps the same renderer in a realistic chassis, picked by aspect ratio alone; TV pillarboxes non-landscape content rather than distorting the chassis shape | Example application (10%) |
+| Layout Debugger overlay ("DevTools for Ads") | Toggle-able safe-area outline + per-element zone/shrink bounding boxes drawn in the exact same transformed coordinate space as the real elements | Code quality (10%); §4.7 |
 | Live unknown-surface input | Type a brand-new surface, resolve it through the identical pipeline; real validation errors shown verbatim | TypeScript & architecture (20%); Example application (10%); §4.20 (live-interview bonus rehearsal) |
 
 ---
@@ -276,7 +294,7 @@ src/
     self-healing-scenario.ts adversarial spec + tiny surface (5.2)
     render-dom.ts            deliberate stub (framework-agnostic renderer seam)
     spec.invalid-example.ts.txt   compile-error demonstration (excluded from build)
-    __tests__/               11 Vitest suites, 98 tests
+    __tests__/               11 Vitest suites, 106 tests
   components/
     SurfaceStage.tsx         the one ResolvedLayout → pixels renderer
     LayoutDebugger.tsx       explainability panel 1
