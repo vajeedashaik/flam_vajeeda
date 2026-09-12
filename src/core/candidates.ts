@@ -122,6 +122,20 @@ interface PlacementRequest {
   min: SizeConstraint;
   /** brandRules.locked — never resized away from `preferred`, growth included. */
   locked: boolean;
+  /**
+   * interaction === "clickable" — exempt from generic "grow into slack"
+   * (see `sizeAxis`). A clickable element's size is already a deliberate,
+   * purposeful number (touch-target scale + the surface's real minTapTarget,
+   * both applied above in this function) — piling the generic slack-growth
+   * multiplier on top of that produced a real, visible bug: a CTA whose
+   * PREFERRED shape is a wide short pill (e.g. 138×65) growing height by 40%
+   * on horizontal-split's free axis became a squat, disproportionate blob
+   * that visually dominated the layout, because growth treats width/height as
+   * independent axes with no notion that a button should keep looking like a
+   * button. Text/image elements have no such fixed-shape expectation, so they
+   * keep growing normally.
+   */
+  interactive: boolean;
 }
 
 function toRequest(
@@ -195,6 +209,7 @@ function toRequest(
     preferred,
     min,
     locked: node.brandRules?.locked === true,
+    interactive: node.interaction === "clickable",
   };
 }
 
@@ -330,7 +345,7 @@ export function placeElementsInOrder(
       continue;
     }
 
-    const canGrow = !request.locked;
+    const canGrow = !request.locked && !request.interactive;
     const width = sizeAxis(request.preferred.width, slot.maxWidth, growAxes.width && canGrow);
     const height = sizeAxis(request.preferred.height, slot.maxHeight, growAxes.height && canGrow);
     const el: ResolvedElement = {
