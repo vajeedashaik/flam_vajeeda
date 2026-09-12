@@ -209,7 +209,7 @@ export default function App(): JSX.Element {
             <b>{String(context.isFarViewing)}</b>
           </p>
 
-          <div style={{ marginBottom: 16 }}>
+          <div className="ale-stage-wrap" style={{ marginBottom: 16 }}>
             <DeviceFrame
               surface={surface}
               elements={layout.elements}
