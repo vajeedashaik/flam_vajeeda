@@ -344,27 +344,30 @@ describe("generateCandidates — emergency-fit: always-visible elements survive 
     expect(winnerScore).toBeGreaterThan(0);
   });
 
-  it("height too short for a COLUMN of always-elements: emergency-fit switches to a ROW and fits all 4, not just headline+cta", () => {
+  it("height too short for a COLUMN of always-elements: emergency-fit switches to a ROW and fits all 3, not just headline+cta", () => {
     const ctx = resolveContext(tooShort);
     const cands = generateCandidates(buildGraph(productAd), ctx, tooShort);
     const emergency = strat(cands, "emergency-fit");
 
-    for (const id of ["headline", "cta", "price", "logo"]) {
+    // §7.8: the 3 always-visible elements are headline, cta, and
+    // product-image (the "highlight") — price/logo are degradable and may or
+    // may not fit alongside them.
+    for (const id of ["headline", "cta", "product-image"]) {
       expect(el(emergency, id).visible, `${id} should survive on a 320×50 banner`).toBe(true);
     }
   });
 
-  it("REGRESSION GUARD (§7.7): the 4 'info' elements survive on real, standard ad sizes too small for a single-column emergency floor", () => {
+  it("REGRESSION GUARD (§7.8): headline, cta, AND the product photo survive on real, standard ad sizes too small for a single-column emergency floor", () => {
     // 320×50 (mobile banner) and 728×90 (leaderboard) are real IAB ad units,
-    // not synthetic edge cases — both are shorter than 4 always-elements
-    // stacked in one column (4 × 16px = 64px) but wide enough for a row.
+    // not synthetic edge cases — both are shorter than 3 always-elements
+    // stacked in one column (3 × 16px = 48px) but wide enough for a row.
     for (const [width, height] of [
       [320, 50],
       [728, 90],
     ] as const) {
       const surface: SurfaceProfile = defineSurface({ id: `standard-${width}x${height}`, width, height });
       const { layout, trace } = resolveLayout(buildGraph(productAd), resolveContext(surface), surface);
-      for (const id of ["headline", "cta", "price", "logo"]) {
+      for (const id of ["headline", "cta", "product-image"]) {
         const e = layout.elements.find((el) => el.id === id);
         expect(e?.visible, `${width}×${height}: ${id} should be visible (winner: ${trace.winningStrategy})`).toBe(true);
       }
