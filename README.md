@@ -166,11 +166,6 @@ Approximately **1 day** of focused work, across six specified phases
 
 ## AI tool disclosure
 
-<!--
-TODO(author): review and adjust the exact wording of this section before final
-submission. Draft below.
--->
-
 Claude Code (Anthropic) was used throughout implementation. Development ran in
 six explicitly specified phases (`phase1.md`–`phase6.md` in this repo); at each
 phase a human wrote the specification, reviewed the generated code, ran the tests
@@ -184,8 +179,7 @@ degradation cascade, and the stress/self-healing methodology.
 
 ## Live demo
 
-<!-- TODO(author): replace with the deployed URL once live (Vercel / Netlify). -->
-_Not yet deployed. Placeholder — a live URL will go here._
+Not yet deployed.
 
 Locally: `npm run build && npm run preview` → http://localhost:4173
 
