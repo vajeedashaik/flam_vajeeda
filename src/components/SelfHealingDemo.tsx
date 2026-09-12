@@ -124,26 +124,30 @@ export function SelfHealingDemo(): JSX.Element {
               <h3 className="ale-h3" style={{ color: "var(--bad)" }}>
                 Before — naive attempt (overlapping / clipped)
               </h3>
-              <SurfaceStage
-                surface={selfHealingSurface}
-                elements={naive.elements}
-                specById={specById}
-                maxWidth={360}
-                maxHeight={380}
-              />
+              <div className="ale-stage-wrap">
+                <SurfaceStage
+                  surface={selfHealingSurface}
+                  elements={naive.elements}
+                  specById={specById}
+                  maxWidth={360}
+                  maxHeight={380}
+                />
+              </div>
             </div>
             <div className="ale-card" data-testid="self-healing-after">
               <h3 className="ale-h3" style={{ color: "var(--ok)" }}>
                 After — recovered ({trace.winningStrategy}, {visible.length}/
                 {layout.elements.length} visible)
               </h3>
-              <SurfaceStage
-                surface={selfHealingSurface}
-                elements={layout.elements}
-                specById={specById}
-                maxWidth={360}
-                maxHeight={380}
-              />
+              <div className="ale-stage-wrap">
+                <SurfaceStage
+                  surface={selfHealingSurface}
+                  elements={layout.elements}
+                  specById={specById}
+                  maxWidth={360}
+                  maxHeight={380}
+                />
+              </div>
             </div>
           </div>
 
