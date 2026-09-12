@@ -176,6 +176,27 @@ describe("generateCandidates — grow into slack, capped, brand-lock exempt", ()
     expect(price.height).toBeLessThanOrEqual(naturalHeight * 1.4 + 2);
   });
 
+  it("horizontal-split: does NOT grow the clickable CTA on its free height axis — a button keeps its purposeful shape instead of becoming a disproportionate blob", () => {
+    // Regression test for a real, reported visual bug: on mobileLandscape,
+    // horizontal-split grew the CTA's height 40% (free axis there) while its
+    // width stayed fixed (cascading axis), turning a wide short pill button
+    // into a squat, oddly-proportioned shape that visually dominated the
+    // layout. A clickable element's size is already deliberately set by
+    // touch-scale / minTapTarget-targeting above in toRequest() — generic
+    // slack-growth piling on top of that is what caused it, so clickable
+    // elements are now exempt from it entirely (`request.interactive`).
+    const ctaSpec = productAd.elements.find((e) => e.id === "cta")!;
+    const lineHeight = Math.ceil((ctaSpec.fontSize ?? 16) * 1.3);
+    const naturalHeight = Math.max(
+      lineHeight,
+      ctaSpec.minSize?.height ?? 0,
+      ctaSpec.preferredSize?.height ?? 0,
+    );
+    const cta = el(strat(cands, "horizontal-split"), "cta");
+
+    expect(cta.height).toBeLessThanOrEqual(naturalHeight + 1);
+  });
+
   it("grid (both axes free): a non-locked element grows on both width and height", () => {
     const price = el(strat(cands, "grid"), "price");
     const natural = naturalWidth("price");
