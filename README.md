@@ -1,26 +1,82 @@
+<div align="center">
+
 # Adaptive Layout Engine
 
-A TypeScript system that takes **one declarative ad spec** — the content and the
-intent behind each element, with no width, height, or position — and resolves it
-into a **correct, genuinely different layout for each target "surface"** (a phone
-in portrait, a broadcast lower-third, a retail kiosk, a printed QR panel, an
-unknown surface someone types in live). The layouts are not hardcoded per
-surface and not uniform scaling of one master layout: the engine builds an
-Experience Graph from role semantics, normalizes each surface's real-world
-constraints (tap ergonomics, viewing distance, attention budget) into a context,
-generates several candidate layouts with different spatial strategies, scores
-each with a deterministic fitness function, and picks the best — dropping and
-shrinking lower-priority elements in a defined order when space runs out, while
-never overlapping, clipping, or dropping an element marked "always visible".
-Every resolution carries a decision trace explaining what was chosen and why.
+**A deterministic, constraint-based layout resolution engine for adaptive advertising.**
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design.
+One declarative ad spec → a correct, context-aware layout for *any* surface — resolved, scored, and explained in real time.
 
-**Contents:** [Setup](#setup) · [Running the demo](#running-the-demo) ·
-[Feature overview](#feature-overview) · [Known limitations](#known-limitations) ·
-[Time spent](#time-spent) · [AI tool disclosure](#ai-tool-disclosure) ·
-[Live demo](#live-demo) · [Bonus points](#bonus-points) ·
-[Project layout](#project-layout)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.6-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![React](https://img.shields.io/badge/React-18.3-61DAFB?logo=react&logoColor=black)](https://react.dev/)
+[![Vite](https://img.shields.io/badge/Vite-5.4-646CFF?logo=vite&logoColor=white)](https://vitejs.dev/)
+[![Vitest](https://img.shields.io/badge/tests-144%20passing-brightgreen?logo=vitest&logoColor=white)](#setup)
+[![Stress Lab](https://img.shields.io/badge/stress--tested-200%20surfaces%2C%200%20failed-brightgreen)](#feature-overview)
+[![Node](https://img.shields.io/badge/node-%E2%89%A518-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+
+<br/>
+
+<img src="docs/screenshot.png" alt="Adaptive Layout Engine — single-surface resolution view, showing the resolved layout, decision trace, and scoring breakdown" width="850"/>
+
+</div>
+
+---
+
+## What this is
+
+Most "responsive ad" demos are one fixed layout with CSS breakpoints bolted on. This is a different
+category of problem, solved a different way.
+
+**Adaptive Layout Engine** takes one declarative ad specification — content and *intent*, with no
+width, height, or position ever authored by hand — and resolves it into a genuinely different,
+correct layout for each target surface: a phone in portrait, a broadcast lower-third, a retail
+kiosk, a printed QR panel, or a surface nobody has seen before, typed in live during a demo.
+
+Every resolution runs a real constraint-solving pipeline, not a lookup table or a set of media
+queries:
+
+1. **Experience Graph** — derives proximity/exclusion relationships between elements from their
+   semantic roles alone (never from hardcoded element ids), so the same rule set generalizes to any
+   spec.
+2. **Context Engine** — normalizes a surface's real-world constraints (tap ergonomics, viewing
+   distance, attention budget, aspect ratio) into qualitative flags with documented thresholds.
+3. **Candidate generation** — five independent spatial strategies (vertical stack, horizontal
+   split, grid, corner-anchored overlay, and an emergency last-resort fallback) each produce a
+   complete, self-consistent layout through one shared placement engine.
+4. **Deterministic scoring** — an **8-dimensional fitness function** scores every candidate
+   (constraint compliance, priority preservation, visual balance, tap-target compliance, render
+   cost, context fit, graph-proximity adjacency, and whole-composition cohesion), with a hard-fail
+   rule that zeroes out any candidate that overlaps, clips, or drops a must-keep element — no matter
+   how well it scores otherwise.
+5. **Explainable resolution** — the winner isn't just chosen, it's *explained*: a full decision
+   trace records why every element was shrunk, grown, or dropped, and why every losing strategy
+   lost, in language a human wrote it to be read as.
+
+The result degrades gracefully under real stress — verified, not assumed, against **200 randomized
+adversarial surfaces per run, with zero hard-invariant violations, every single run** — and heals
+itself when the input is malformed: broken image sources, absurdly long text, missing assets, or a
+surface smaller than the content's own declared minimum size, all injected simultaneously.
+
+For the full technical design, see [ARCHITECTURE.md](ARCHITECTURE.md). For a from-scratch,
+adversarial internal audit of the project's own output quality — with measured before/after
+numbers, not self-reported claims — see [PHASE8-AUDIT.md](PHASE8-AUDIT.md).
+
+## At a glance
+
+| | |
+|---|---|
+| **Resolution strategies** | 5 — vertical-stack, horizontal-split, grid, overlay-safe-margins, emergency-fit |
+| **Scoring dimensions** | 8 independently-weighted sub-scores + a hard-fail invariant rule |
+| **Test suite** | 144 tests across 11 suites · `tsc --noEmit` strict mode, zero `any` |
+| **Stress testing** | 200 randomized adversarial surfaces per run · **0 failed, every run** |
+| **Self-healing** | Recovers from broken images, missing assets, absurd text length, and undersized surfaces — simultaneously |
+| **Live surfaces** | 5 built-in (phone / TV / kiosk / print) + unlimited via live "unknown surface" input |
+| **Explainability** | Every shrink, grow, drop, win, and loss traced in plain language — not just logged |
+
+**Contents:** [What this is](#what-this-is) · [At a glance](#at-a-glance) · [Setup](#setup) ·
+[Running the demo](#running-the-demo) · [Feature overview](#feature-overview) ·
+[Known limitations](#known-limitations) · [Time spent](#time-spent) ·
+[AI tool disclosure](#ai-tool-disclosure) · [Live demo](#live-demo) ·
+[Bonus points](#bonus-points) · [Project layout](#project-layout)
 
 ---
 
@@ -31,7 +87,7 @@ Requires Node 18+.
 ```bash
 npm install       # install dependencies
 npm run dev       # start the Vite dev server (http://localhost:5173)
-npm run test      # run the full Vitest suite (138 tests)
+npm run test      # run the full Vitest suite (144 tests)
 npm run build     # type-check (tsc --noEmit) + production build to dist/
 npm run preview   # serve the production build locally (http://localhost:4173)
 ```
@@ -46,7 +102,7 @@ Start `npm run dev` (or `npm run build && npm run preview` for the production
 build) and open the page. A top nav bar switches between views:
 
 - **Single surface** — the default view. Use the **surface picker** dropdown to
-  switch between the 5 sample surfaces (plus a pre-shrunk 200×200 kiosk). The
+  switch between the 5 sample surfaces (plus a pre-shrunk 70×70 kiosk). The
   resolved layout renders at true aspect ratio, scaled to fit. Below the header
   you see the winning strategy, how many elements stayed visible, and the derived
   context flags (aspect / attention / touch / far).
@@ -76,7 +132,8 @@ build) and open the page. A top nav bar switches between views:
     badged "CHOSEN"; click a losing strategy to see a generated sentence naming
     the sub-score it lost on and by how many points.
   - **Layout Health Check** — a pass / warn / fail checklist derived from the
-    winning candidate's six sub-scores (including `contextFit`).
+    winning candidate's eight sub-scores (including `contextFit`,
+    `adjacencyFit`, and `compositionCohesion`).
 - **Side-by-side (5.3)** — all 5 sample surfaces resolved at once, each in a
   plain device-style frame, each the real resolved layout (not a mockup). The
   fastest way to see that the layouts genuinely differ.
@@ -132,7 +189,7 @@ feature numbers (`§4.x`).
 | Context Engine (`resolveContext`) | Normalizes surface constraints (aspect, touch, far-viewing, attention budget, audio, motion) into qualitative flags with documented thresholds | Constraint resolution algorithm (35%); §4.3-context |
 | Context-aware sizing + strategy bias | Far-viewing text/buttons and touch-surface CTAs request genuinely bigger sizes (§4.3-context); a `contextFit` sub-score rewards the strategy whose geometry matches the surface's aspect ratio and rewards fewer visible elements under a short attention budget or far viewing | Constraint resolution algorithm (35%); §4.3-context, §4.14 |
 | Candidate generation (5 strategies) | vertical-stack / horizontal-split / grid / overlay-safe-margins / emergency-fit, all through one shared priority-ordered placement engine | Constraint resolution algorithm (35%); Layout correctness (25%); §4.3 |
-| Deterministic fitness scoring | 6 weighted sub-scores + hard-fail-to-0 rule for overlap / out-of-bounds / dropped-always / priority-inversion; pure function | Constraint resolution algorithm (35%); Code quality (10%); §4.3 |
+| Deterministic fitness scoring | 8 weighted sub-scores + hard-fail-to-0 rule for overlap / out-of-bounds / dropped-always / priority-inversion; pure function | Constraint resolution algorithm (35%); Code quality (10%); §4.3 |
 | Performance-aware scoring term | `renderCost` sub-score (element count + mean size) breaks near-ties toward cheaper-to-render layouts | Constraint resolution algorithm (35%); §4.9 |
 | Lightweight declarative constraints | safeArea, `minSize`, `minTapTarget`, `brandRules.locked` are declared on the spec/surface and read by the scorer — not hardcoded in the resolver | TypeScript & architecture (20%); §4.4 / §4.6 |
 | Priority degradation cascade | Shrink toward minSize, then drop lowest-priority-first in a strict monotone cascade; `visibility:"always"` elements never dropped | Constraint resolution algorithm (35%); core req: "priority-based degradation, not overlap/clip"; §4.5 |
@@ -224,21 +281,27 @@ Real, specific to what was built (more technical depth in
 
 ## Time spent
 
-Approximately **1 day** of focused work, across six specified phases
-(`phase1.md`–`phase6.md`).
+Built across seven specified phases (`phase1.md`–`phase7.md`), plus a
+from-scratch adversarial audit round (see [PHASE8-AUDIT.md](PHASE8-AUDIT.md))
+that found and fixed three additional real bugs after the phases were
+"complete" — including one severe enough to invert the ad's entire visual
+hierarchy under real-world constraints. <!-- update this line with your actual total time before publishing -->
 
 ---
 
 ## AI tool disclosure
 
 Claude Code (Anthropic) was used throughout implementation. Development ran in
-six explicitly specified phases (`phase1.md`–`phase6.md` in this repo); at each
-phase a human wrote the specification, reviewed the generated code, ran the tests
-and the browser checks, and only then moved to the next phase. No phase was
-accepted without its acceptance criteria being met. The author has read the
-entire codebase and can explain and defend every part of it — the type design,
-the edge-derivation rules, the scoring weights and hard-fail rule, the
-degradation cascade, and the stress/self-healing methodology.
+seven explicitly specified phases (`phase1.md`–`phase7.md` in this repo); at
+each phase a human wrote the specification, reviewed the generated code, ran
+the tests and the browser checks, and only then moved to the next phase. No
+phase was accepted without its acceptance criteria being met. A further,
+unscripted audit round — the author acting as a deliberately strict reviewer
+of the live application, not the code — found and drove the fixes documented
+in [PHASE8-AUDIT.md](PHASE8-AUDIT.md). The author has read the entire codebase
+and can explain and defend every part of it — the type design, the
+edge-derivation rules, the scoring weights and hard-fail rule, the degradation
+cascade, and the stress/self-healing methodology.
 
 ---
 
@@ -322,7 +385,7 @@ src/
     self-healing-scenario.ts adversarial spec + tiny surface (5.2)
     render-dom.ts            deliberate stub (framework-agnostic renderer seam)
     spec.invalid-example.ts.txt   compile-error demonstration (excluded from build)
-    __tests__/               11 Vitest suites, 138 tests
+    __tests__/               11 Vitest suites, 144 tests
   components/
     SurfaceStage.tsx         the one ResolvedLayout → pixels renderer
     DeviceFrame.tsx          phone/TV/clean device chassis wrapper (presentation only)
@@ -337,8 +400,9 @@ src/
                               Nykaa-branded (hot-pink accent, white cards),
                               light only, prefers-reduced-motion aware
   App.tsx main.tsx
-phase1.md … phase6.md        the phase specifications this was built against
-ARCHITECTURE.md
+phase1.md … phase7.md        the phase specifications this was built against
+ARCHITECTURE.md               full technical design
+PHASE8-AUDIT.md                a from-scratch, adversarial audit of the live app
 ```
 
 The UI is a presentation layer only: all styling lives in `styles/theme.css`
