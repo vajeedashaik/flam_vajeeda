@@ -1,9 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { scoreCandidate, computeAdjacencyFit } from "../scoring";
+import { scoreCandidate, computeAdjacencyFit, computeCompositionCohesion } from "../scoring";
 import { availableBox, generateCandidates, type Candidate } from "../candidates";
 import { buildGraph } from "../graph";
 import type { ExperienceGraph } from "../graph";
 import { resolveContext } from "../context";
+import { resolveLayout } from "../resolver";
 import { productAd, surfaceProfiles } from "../sample-data";
 import type { ResolvedElement } from "../resolver";
 
@@ -353,5 +354,130 @@ describe("scoreCandidate — visualBalance (§7.2 audit: confirms it does not re
     const centredScore = scoreCandidate(centred, graph, ctx, kiosk).visualBalance;
     const offCentreScore = scoreCandidate(offCentre, graph, ctx, kiosk).visualBalance;
     expect(centredScore).toBeGreaterThan(offCentreScore);
+  });
+});
+
+/**
+ * §7.4 — computeCompositionCohesion judges the WHOLE visible set as one
+ * composition, not just one declared graph pair (that's adjacencyFit's job).
+ * A real ad's elements are never independent pieces scattered into separate
+ * corners with a dead void between them; this sub-score is what stops a
+ * strategy like overlay-safe-margins from winning just because its
+ * constraintViolations/priorityPreservation numbers happen to be clean.
+ */
+describe("computeCompositionCohesion (§7.4: the whole ad must read as one connected composition)", () => {
+  it("returns neutral 100 when fewer than two elements are visible", () => {
+    const single: Candidate = {
+      strategy: "vertical-stack",
+      notes: [],
+      elements: [
+        vis("headline", "primary", 48, 48, 420, 96),
+        dropped("cta", "action"),
+        dropped("product-image", "hero"),
+        dropped("price", "secondary"),
+        dropped("logo", "branding"),
+      ],
+    };
+    expect(computeCompositionCohesion(single)).toBe(100);
+  });
+
+  it("scores a tightly packed cluster of elements higher than the same elements scattered into far corners", () => {
+    const packed: Candidate = {
+      strategy: "vertical-stack",
+      notes: [],
+      elements: [
+        vis("headline", "primary", 0, 0, 200, 100),
+        vis("cta", "action", 0, 100, 100, 60),
+        vis("product-image", "hero", 100, 100, 100, 60),
+        dropped("price", "secondary"),
+        dropped("logo", "branding"),
+      ],
+    };
+    const scattered: Candidate = {
+      strategy: "overlay-safe-margins",
+      notes: [],
+      elements: [
+        vis("headline", "primary", 0, 0, 200, 100), // top-left
+        vis("cta", "action", 1800, 0, 100, 60), // top-right, far away
+        vis("product-image", "hero", 0, 1800, 100, 60), // bottom-left, far away
+        dropped("price", "secondary"),
+        dropped("logo", "branding"),
+      ],
+    };
+
+    const packedScore = computeCompositionCohesion(packed);
+    const scatteredScore = computeCompositionCohesion(scattered);
+    expect(packedScore).toBeGreaterThan(scatteredScore);
+    // The scattered case should read as genuinely bad, not just "a bit worse".
+    expect(scatteredScore).toBeLessThan(20);
+  });
+
+  it("is deterministic — identical inputs produce an identical score", () => {
+    const c = cleanCandidate();
+    const a = computeCompositionCohesion(c);
+    const b = computeCompositionCohesion(c);
+    expect(a).toBe(b);
+  });
+
+  it("does not penalize a legitimate full-width composition that efficiently fills its own footprint", () => {
+    // A wide banner: headline hugs the left edge, cta hugs the right edge, but
+    // both are large relative to the gap between them — this is a normal,
+    // good wide-format ad (like a real lower-third), not "scattered corners
+    // with a dead void." It should score well despite spanning the surface.
+    const wideBanner: Candidate = {
+      strategy: "horizontal-split",
+      notes: [],
+      elements: [
+        vis("headline", "primary", 0, 0, 700, 200),
+        vis("cta", "action", 700, 0, 700, 200),
+        dropped("product-image", "hero"),
+        dropped("price", "secondary"),
+        dropped("logo", "branding"),
+      ],
+    };
+    expect(computeCompositionCohesion(wideBanner)).toBeGreaterThan(90);
+  });
+
+  it("on every real sample surface, overlay-safe-margins's scattered corners score meaningfully lower on compositionCohesion than vertical-stack's clustered arrangement", () => {
+    for (const surfaceKey of [
+      "mobilePortrait",
+      "mobileLandscape",
+      "broadcastLowerThird",
+      "retailKiosk",
+      "printQRPanel",
+    ] as const) {
+      const s = surfaceProfiles[surfaceKey];
+      const sCtx = resolveContext(s);
+      const candidates = generateCandidates(graph, sCtx, s);
+      const overlay = candidates.find((c) => c.strategy === "overlay-safe-margins")!;
+      const vertical = candidates.find((c) => c.strategy === "vertical-stack")!;
+
+      const overlayCohesion = computeCompositionCohesion(overlay);
+      const verticalCohesion = computeCompositionCohesion(vertical);
+      expect(
+        verticalCohesion,
+        `${surfaceKey}: expected vertical-stack's cohesion (${verticalCohesion}) > overlay-safe-margins's (${overlayCohesion})`,
+      ).toBeGreaterThan(overlayCohesion);
+    }
+  });
+
+  it("REGRESSION GUARD: overlay-safe-margins's scattered-corners arrangement does not win the real resolver on any of the 5 sample surfaces", () => {
+    // This is the exact user-facing bug this sub-score exists to fix: an ad
+    // whose components are split across separate corners with a dead void in
+    // the middle must never be the pipeline's actual choice.
+    for (const surfaceKey of [
+      "mobilePortrait",
+      "mobileLandscape",
+      "broadcastLowerThird",
+      "retailKiosk",
+      "printQRPanel",
+    ] as const) {
+      const s = surfaceProfiles[surfaceKey];
+      const { trace } = resolveLayout(graph, resolveContext(s), s);
+      expect(
+        trace.winningStrategy,
+        `${surfaceKey} resolved to overlay-safe-margins's scattered-corners layout`,
+      ).not.toBe("overlay-safe-margins");
+    }
   });
 });
