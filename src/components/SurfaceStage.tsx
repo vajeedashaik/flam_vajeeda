@@ -30,9 +30,37 @@ import type { AdElement } from "../core/spec";
 import type { ResolvedElement } from "../core/resolver";
 import type { SurfaceProfile } from "../core/surfaces";
 import type { DecisionTrace } from "../core/trace";
+import { measureTextBlock } from "../core/text-measure";
 import { DebugOverlay } from "./DebugOverlay";
 
 export type StageFrame = "phone" | "wide" | "square" | "none";
+
+/** Matches candidates.ts's own default when a text/button element declares no fontSize. */
+const DEFAULT_FONT_SIZE = 16;
+/** Never render text smaller than this, no matter how hard a box was shrunk. */
+const MIN_LEGIBLE_FONT = 8;
+
+/**
+ * The resolver sizes a text/button element from its NATURAL (unwrapped, full
+ * font size) footprint, then the placement cascade can still shrink the box
+ * below that when space runs out (§5's shrink-then-drop cascade). Rendering
+ * real copy at a fixed font size would let a heavily-shrunk box's text simply
+ * overflow past `overflow: hidden` and read as gibberish. This picks the
+ * largest font size (down to `MIN_LEGIBLE_FONT`) whose wrapped block still
+ * fits the box actually resolved — pure presentation, reuses the exact same
+ * `measureTextBlock` the resolver already uses to size things for real.
+ */
+function fitFontSize(
+  text: string,
+  declaredFontSize: number,
+  boxWidth: number,
+  boxHeight: number,
+): number {
+  const block = measureTextBlock(text, declaredFontSize, boxWidth);
+  if (block.height <= boxHeight) return declaredFontSize;
+  const scale = boxHeight / block.height;
+  return Math.max(MIN_LEGIBLE_FONT, Math.floor(declaredFontSize * scale));
+}
 
 interface StageElementProps {
   el: ResolvedElement;
@@ -78,9 +106,32 @@ function StageElement({ el, spec }: StageElementProps): JSX.Element {
     );
   }
 
+  // Real copy when the spec carries it (the same string candidates.ts already
+  // measured to size this element) — falls back to the id/role/size debug
+  // label only for specs that never set `text` at all.
+  const label =
+    spec?.text ??
+    `${el.role} (${el.id}) ${Math.round(el.width)}×${Math.round(el.height)}`;
+  const textStyle: React.CSSProperties | undefined =
+    spec?.text !== undefined
+      ? {
+          fontSize: fitFontSize(
+            spec.text,
+            spec.fontSize ?? DEFAULT_FONT_SIZE,
+            el.width,
+            el.height,
+          ),
+        }
+      : undefined;
+
   return (
-    <div className="ale-el" data-element-id={el.id} data-role={el.role} style={pos}>
-      {el.role} ({el.id}) {Math.round(el.width)}×{Math.round(el.height)}
+    <div
+      className="ale-el"
+      data-element-id={el.id}
+      data-role={el.role}
+      style={{ ...pos, ...textStyle }}
+    >
+      {label}
     </div>
   );
 }
@@ -136,6 +187,9 @@ export function SurfaceStage({
               {visible.map((el) => (
                 <StageElement key={el.id} el={el} spec={specById?.get(el.id)} />
               ))}
+              <span className="ale-platform-badge" aria-hidden="true">
+                nykaa
+              </span>
               {showDebug && (
                 <DebugOverlay surface={surface} elements={elements} trace={trace} />
               )}
