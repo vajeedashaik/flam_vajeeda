@@ -77,13 +77,15 @@ export function NaiveVsSmart({
             Naive — uniform scale, no priority ({naiveVisible}/
             {naive.elements.length} visible, overlap allowed)
           </h3>
-          <SurfaceStage
-            surface={surface}
-            elements={naive.elements}
-            specById={specById}
-            maxWidth={440}
-            maxHeight={440}
-          />
+          <div className="ale-stage-wrap">
+            <SurfaceStage
+              surface={surface}
+              elements={naive.elements}
+              specById={specById}
+              maxWidth={440}
+              maxHeight={440}
+            />
+          </div>
         </div>
 
         <div className="ale-card" data-testid="smart-side">
@@ -91,13 +93,15 @@ export function NaiveVsSmart({
             Smart — {smart.trace.winningStrategy} ({smartVisible}/
             {smart.layout.elements.length} visible, zero overlap)
           </h3>
-          <SurfaceStage
-            surface={surface}
-            elements={smart.layout.elements}
-            specById={specById}
-            maxWidth={440}
-            maxHeight={440}
-          />
+          <div className="ale-stage-wrap">
+            <SurfaceStage
+              surface={surface}
+              elements={smart.layout.elements}
+              specById={specById}
+              maxWidth={440}
+              maxHeight={440}
+            />
+          </div>
         </div>
       </div>
     </section>
