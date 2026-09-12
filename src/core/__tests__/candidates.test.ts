@@ -6,6 +6,7 @@ import { resolveLayout } from "../resolver";
 import { defineSurface, type SurfaceProfile } from "../surfaces";
 import { productAd, surfaceProfiles } from "../sample-data";
 import { measureTextWidth } from "../text-measure";
+import { buildSelfHealingSpec, selfHealingSurface } from "../self-healing-scenario";
 
 const ALL_STRATEGIES: CandidateStrategy[] = [
   "vertical-stack",
@@ -211,6 +212,28 @@ describe("generateCandidates — grow into slack, capped, brand-lock exempt", ()
     expect(price.width).toBeGreaterThan(natural * 1.05);
   });
 
+  it("§7.9: the hero role (product-image) grows past the standard 1.4x cap other elements are held to", () => {
+    const grid = strat(cands, "grid");
+    const image = el(grid, "product-image");
+    const headline = el(grid, "headline");
+    const imageSpec = productAd.elements.find((e) => e.id === "product-image")!;
+    const naturalImageWidth = imageSpec.preferredSize!.width; // images aren't text-measured
+
+    // Standard cap (1.4x) would top out here — the hero role must exceed it.
+    expect(image.width).toBeGreaterThan(naturalImageWidth * 1.4 + 1);
+    // HERO_GROWTH_CAP_FACTOR = 1.9 in candidates.ts; +2 covers rounding.
+    expect(image.width).toBeLessThanOrEqual(Math.ceil(naturalImageWidth) * 1.9 + 2);
+
+    // And the practical point of the boost: on a strategy that grows every
+    // element, the photo should grow proportionally MORE than a same-cap-1.4x
+    // text element relative to each one's own natural size — i.e. its size
+    // advantage is a deliberate design choice, not an accident of geometry.
+    const naturalHeadlineWidth = naturalWidth("headline");
+    const imageGrowthRatio = image.width / naturalImageWidth;
+    const headlineGrowthRatio = headline.width / naturalHeadlineWidth;
+    expect(imageGrowthRatio).toBeGreaterThan(headlineGrowthRatio);
+  });
+
   it("overlay-safe-margins deliberately opts out of growth — sizes stay at natural/shrunk only", () => {
     const price = el(strat(cands, "overlay-safe-margins"), "price");
     const natural = naturalWidth("price");
@@ -381,18 +404,53 @@ describe("generateCandidates — emergency-fit: always-visible elements survive 
     const vs = strat(cands, "vertical-stack");
     const emergency = strat(cands, "emergency-fit");
 
-    // Both place every element (nothing needed rescuing here) — the relaxed
-    // floor is unconditional in emergency-fit, so its always-elements are
-    // deliberately tiny even though there was no need, which is exactly what
-    // keeps it losing on every surface that didn't need the rescue.
-    for (const id of ["headline", "cta", "product-image", "price", "logo"]) {
+    // vertical-stack places every element (nothing needed rescuing here).
+    // emergency-fit places only the always-visible ones (§7.9 — it never
+    // places degradable elements at all, by design: a "last resort" strategy
+    // that shrinks the critical content to a floor size has no business also
+    // showing secondary content at full size, which would visually dominate
+    // the very elements it was supposed to protect). Both keeping its
+    // always-elements deliberately tiny AND dropping price/logo entirely is
+    // what keeps it losing on every surface that didn't need the rescue.
+    for (const id of ["headline", "cta", "product-image"]) {
       expect(el(vs, id).visible).toBe(true);
-      expect(el(emergency, id).visible).toBe(true);
+      expect(el(emergency, id).visible, `${id} should be placed by emergency-fit`).toBe(true);
+    }
+    for (const id of ["price", "logo"]) {
+      expect(el(vs, id).visible).toBe(true);
+      expect(el(emergency, id).visible, `${id} should NOT be placed by emergency-fit`).toBe(false);
     }
     expect(el(emergency, "headline").width).toBeLessThan(el(vs, "headline").width);
 
     const { trace } = resolveLayout(buildGraph(productAd), ctx, spacious);
     expect(trace.winningStrategy).not.toBe("emergency-fit");
+  });
+
+  it("REGRESSION GUARD (§7.9): emergency-fit never lets a degradable element (price/logo) outsize an always-visible one — the ad's actual message must never be visually smaller than its fine print", () => {
+    // The exact bug found via live measurement: on a real 320×50 banner,
+    // emergency-fit used to place price at 198×50 (76% of the ad) while
+    // headline/cta/product-image were squeezed to 24×22 (4% each) — a
+    // completely inverted visual hierarchy. Assert it can never recur: every
+    // VISIBLE element in an emergency-fit candidate must be always-visible,
+    // and its area must never be dwarfed by what a degradable element would
+    // have needed at natural size.
+    for (const [w, h] of [
+      [320, 50],
+      [728, 90],
+      [100, 600],
+    ] as const) {
+      const surface: SurfaceProfile = defineSurface({ id: `guard-${w}x${h}`, width: w, height: h });
+      const cands = generateCandidates(buildGraph(productAd), resolveContext(surface), surface);
+      const emergency = strat(cands, "emergency-fit");
+      for (const e of emergency.elements) {
+        if (!e.visible) continue;
+        const node = buildGraph(productAd).nodes.find((n) => n.id === e.id)!;
+        expect(
+          node.visibility,
+          `${w}×${h}: emergency-fit placed "${e.id}" (visibility:"${node.visibility}") — only always-visible elements may ever be placed`,
+        ).toBe("always");
+      }
+    }
   });
 
   it("emergency-fit never breaks the non-overlap / in-bounds invariants, even at its most degenerate", () => {
@@ -593,5 +651,63 @@ describe("generateCandidates — vertical-stack/horizontal-split centre their bl
     const cta = el(vs, "cta");
     expect(headline.x).toBeCloseTo(box.x, 3);
     expect(cta.x).toBeCloseTo(box.x, 3);
+  });
+});
+
+/**
+ * §7.10 — found by inspecting the Self-Healing demo's live output, not
+ * theorized: an element whose WIDTH shrank drastically but whose HEIGHT grew
+ * by even a fraction of a pixel (grid's cell shape can do this to a long
+ * headline) was labelled "grew to ... (+X%)" with an X that was actually
+ * NEGATIVE — e.g. "headline: wanted 1569×120, grew to 120×130 (+-92%)" for an
+ * element that had just been shrunk to roughly a thirteenth of its width. The
+ * grow/shrink verdict is now decided by the same AREA comparison the
+ * percentage itself uses, so they can never disagree again.
+ */
+describe("placeElementsInOrder — grow/shrink note verdict matches the percentage it reports (§7.10)", () => {
+  it("labels a net-smaller element 'shrunk', never 'grew', even when one individual axis increased", () => {
+    // buildSelfHealingSpec's headline is a very long, unwrapped string on a
+    // narrow touch panel — grid's cell width forces a drastic width cut while
+    // its cell height (taller than the headline's own natural line height)
+    // lets height tick up slightly. This is the exact real scenario that
+    // surfaced the bug.
+    const spec = buildSelfHealingSpec("en");
+    const g = buildGraph(spec);
+    const { trace } = resolveLayout(g, resolveContext(selfHealingSurface), selfHealingSurface);
+
+    const headlineNote = trace.perElementNotes.find((n) => n.startsWith("headline:"));
+    expect(headlineNote, "expected a note for headline").toBeDefined();
+    // Never claims to have grown when it net-shrank.
+    expect(headlineNote).not.toMatch(/grew/i);
+    expect(headlineNote).not.toMatch(/\+-/); // the exact nonsensical fragment from the bug report
+    expect(headlineNote).toMatch(/shrunk \d+%/);
+  });
+
+  it("computeAdjacencyFit-style sanity: growNote/shrinkNote verdict is never contradicted by its own percentage sign", () => {
+    // General property, not just the one reported case: for every strategy on
+    // every sample surface, if a note says "grew", the area must genuinely be
+    // larger, and vice versa for "shrunk".
+    for (const surfaceKey of Object.keys(surfaceProfiles) as (keyof typeof surfaceProfiles)[]) {
+      const surface = surfaceProfiles[surfaceKey];
+      const cands = generateCandidates(graph, resolveContext(surface), surface);
+      for (const c of cands) {
+        for (const note of c.notes) {
+          const grewMatch = note.match(/wanted (\d+)×(\d+(?:\.\d+)?), grew to (\d+(?:\.\d+)?)×(\d+(?:\.\d+)?) \(\+(-?\d+)%\)/);
+          if (grewMatch) {
+            const [, pw, ph, fw, fh] = grewMatch;
+            const before = Number(pw) * Number(ph);
+            const after = Number(fw) * Number(fh);
+            expect(after, `"${note}" claims growth but area did not increase`).toBeGreaterThan(before);
+          }
+          const shrunkMatch = note.match(/wanted (\d+(?:\.\d+)?)×(\d+(?:\.\d+)?), placed at (\d+(?:\.\d+)?)×(\d+(?:\.\d+)?) → shrunk (\d+)%/);
+          if (shrunkMatch) {
+            const [, pw, ph, fw, fh] = shrunkMatch;
+            const before = Number(pw) * Number(ph);
+            const after = Number(fw) * Number(fh);
+            expect(after, `"${note}" claims shrinkage but area did not decrease`).toBeLessThan(before);
+          }
+        }
+      }
+    }
   });
 });
