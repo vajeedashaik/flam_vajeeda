@@ -124,7 +124,11 @@ interface PlacementRequest {
   locked: boolean;
 }
 
-function toRequest(node: GraphNode, context: Context): PlacementRequest {
+function toRequest(
+  node: GraphNode,
+  context: Context,
+  surface: SurfaceProfile,
+): PlacementRequest {
   let preferred = node.preferredSize ?? node.minSize ?? FALLBACK_PREFERRED;
 
   // Phase 5: when a text/button element carries its literal string, size it from
@@ -167,6 +171,22 @@ function toRequest(node: GraphNode, context: Context): PlacementRequest {
     };
   }
 
+  // A flat percentage bump above is a reasonable DEFAULT, but it is blind to
+  // what the surface actually requires — a surface with a demanding
+  // minTapTarget (some touch kiosks/accessibility profiles ask for 80–96px)
+  // would still get scored as non-compliant even though the request never
+  // once asked for enough room to comply. Once the surface states a real
+  // number, a clickable element's REQUEST should target it directly — the
+  // scorer (constraintViolationsScore / tapTargetComplianceScore) is the
+  // right place to grade whether it was actually met, not the only place the
+  // requirement is ever consulted.
+  if (node.interaction === "clickable" && surface.minTapTarget !== undefined) {
+    preferred = {
+      width: Math.max(preferred.width, surface.minTapTarget),
+      height: Math.max(preferred.height, surface.minTapTarget),
+    };
+  }
+
   const min = node.minSize ?? preferred;
   return {
     id: node.id,
@@ -182,13 +202,14 @@ function toRequest(node: GraphNode, context: Context): PlacementRequest {
 function orderedRequests(
   graph: ExperienceGraph,
   context: Context,
+  surface: SurfaceProfile,
 ): PlacementRequest[] {
   return [...graph.nodes]
     .sort((a, b) => {
       if (a.priority !== b.priority) return a.priority - b.priority;
       return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
     })
-    .map((node) => toRequest(node, context));
+    .map((node) => toRequest(node, context, surface));
 }
 
 /**
@@ -472,7 +493,7 @@ export function generateCandidates(
   surface: SurfaceProfile,
 ): Candidate[] {
   const box = availableBox(surface);
-  const requests = orderedRequests(graph, context);
+  const requests = orderedRequests(graph, context, surface);
 
   const build = (
     strategy: CandidateStrategy,
