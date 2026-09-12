@@ -3,8 +3,12 @@
  *
  * Renders all five sample surfaces at once, each resolved through the real
  * pipeline (buildGraph is shared; resolveContext + resolveLayout run per
- * surface) and drawn in a device-style frame, scaled to fit a grid cell.
- * Every mini-render is the actual resolved layout — no mockups.
+ * surface) and drawn in the SAME realistic device chassis (`DeviceFrame`) the
+ * single-surface view uses — phone bezel, TV monitor, or clean studio frame,
+ * picked by aspect ratio alone via `deviceType="auto"`, exactly like Single
+ * surface's default. Every mini-render is the actual resolved layout — no
+ * mockups, and no second, plainer frame implementation to keep in sync with
+ * the real one.
  */
 
 import { useMemo } from "react";
@@ -13,16 +17,16 @@ import { resolveContext } from "../core/context";
 import { resolveLayout } from "../core/resolver";
 import type { ExperienceGraph } from "../core/graph";
 import type { AdElement } from "../core/spec";
-import { SurfaceStage, type StageFrame } from "./SurfaceStage";
+import { DeviceFrame } from "./DeviceFrame";
 
-const CELL = { width: 340, height: 340 };
+const CELL = { width: 300, height: 460 };
 
-const SURFACES: { key: keyof typeof surfaceProfiles; frame: StageFrame }[] = [
-  { key: "mobilePortrait", frame: "phone" },
-  { key: "mobileLandscape", frame: "phone" },
-  { key: "broadcastLowerThird", frame: "wide" },
-  { key: "retailKiosk", frame: "square" },
-  { key: "printQRPanel", frame: "square" },
+const SURFACE_KEYS: (keyof typeof surfaceProfiles)[] = [
+  "mobilePortrait",
+  "mobileLandscape",
+  "broadcastLowerThird",
+  "retailKiosk",
+  "printQRPanel",
 ];
 
 export function MultiSurfaceView({
@@ -34,14 +38,14 @@ export function MultiSurfaceView({
 }): JSX.Element {
   const resolved = useMemo(
     () =>
-      SURFACES.map(({ key, frame }) => {
+      SURFACE_KEYS.map((key) => {
         const surface = surfaceProfiles[key];
         const { layout, trace } = resolveLayout(
           graph,
           resolveContext(surface),
           surface,
         );
-        return { key, frame, surface, layout, trace };
+        return { key, surface, layout, trace };
       }),
     [graph],
   );
@@ -54,22 +58,29 @@ export function MultiSurfaceView({
       </p>
 
       <div className="ale-multi-grid" style={{ marginTop: 4 }}>
-        {resolved.map(({ key, frame, surface, layout, trace }) => {
+        {resolved.map(({ key, surface, layout, trace }) => {
           const visible = layout.elements.filter((e) => e.visible);
           return (
-            <div key={key} data-testid="multi-surface-cell" data-surface={key}>
-              <SurfaceStage
+            <figure
+              key={key}
+              className="ale-multi-cell"
+              data-testid="multi-surface-cell"
+              data-surface={key}
+            >
+              <DeviceFrame
                 surface={surface}
                 elements={layout.elements}
                 specById={specById}
+                trace={trace}
+                deviceType="auto"
                 maxWidth={CELL.width}
                 maxHeight={CELL.height}
-                frame={frame}
-                caption={`${surface.name ?? key} · ${surface.width}×${surface.height} · ${
-                  trace.winningStrategy
-                } · ${visible.length}/${layout.elements.length} visible`}
               />
-            </div>
+              <figcaption className="ale-stage-caption">
+                {surface.name ?? key} · {surface.width}×{surface.height} ·{" "}
+                {trace.winningStrategy} · {visible.length}/{layout.elements.length} visible
+              </figcaption>
+            </figure>
           );
         })}
       </div>
