@@ -56,7 +56,7 @@ export function buildTrace(
   };
 }
 
-/** The six weighted sub-scores, in the order the UI lists them. */
+/** The seven weighted sub-scores, in the order the UI lists them. */
 const SUB_SCORES: {
   key: keyof Omit<ScoreBreakdown, "overall">;
   /** Plain-language name of the sub-score. */
@@ -93,6 +93,11 @@ const SUB_SCORES: {
     key: "renderCost",
     label: "render efficiency",
     cause: "it likely used more, smaller elements — more expensive to draw",
+  },
+  {
+    key: "adjacencyFit",
+    label: "element grouping",
+    cause: "a graph-linked pair (e.g. price and its call-to-action) likely ended up far apart, with dead space between them",
   },
 ];
 
