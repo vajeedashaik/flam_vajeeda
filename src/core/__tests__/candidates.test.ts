@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { generateCandidates, type Candidate, type CandidateStrategy } from "../candidates";
 import { buildGraph } from "../graph";
 import { resolveContext, type Context } from "../context";
+import { resolveLayout } from "../resolver";
 import { defineSurface, type SurfaceProfile } from "../surfaces";
 import { productAd, surfaceProfiles } from "../sample-data";
 import { measureTextWidth } from "../text-measure";
@@ -11,6 +12,7 @@ const ALL_STRATEGIES: CandidateStrategy[] = [
   "horizontal-split",
   "overlay-safe-margins",
   "grid",
+  "emergency-fit",
 ];
 
 const graph = buildGraph(productAd);
@@ -284,5 +286,95 @@ describe("generateCandidates — clickable sizing targets the surface's real min
       "cta",
     );
     expect(ctaWithout.width).toBeLessThan(200);
+  });
+});
+
+describe("generateCandidates — emergency-fit: always-visible elements survive even below their declared minSize", () => {
+  // Narrower than headline's declared minSize.width (180) — every normal
+  // strategy cascades to drop everything, including visibility:"always"
+  // elements, because 100 < 180 no matter how the box is sliced.
+  const tooNarrow: SurfaceProfile = defineSurface({ id: "too-narrow", width: 100, height: 600 });
+  // Tall enough for headline alone, but not for headline + cta together —
+  // exercises the "each always-element claims only a small share" behaviour.
+  const tooShort: SurfaceProfile = defineSurface({ id: "too-short", width: 320, height: 50 });
+
+  it("width below headline's declared minSize: the normal 4 strategies all hard-fail to 0", () => {
+    const ctx = resolveContext(tooNarrow);
+    const cands = generateCandidates(buildGraph(productAd), ctx, tooNarrow);
+    for (const strategy of ["vertical-stack", "horizontal-split", "grid", "overlay-safe-margins"] as const) {
+      const c = strat(cands, strategy);
+      const visible = c.elements.filter((e) => e.visible);
+      expect(visible.length, `${strategy} should have nothing (or a dropped always-element)`).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("emergency-fit still places both visibility:\"always\" elements (headline, cta) on that same surface", () => {
+    const ctx = resolveContext(tooNarrow);
+    const cands = generateCandidates(buildGraph(productAd), ctx, tooNarrow);
+    const emergency = strat(cands, "emergency-fit");
+
+    const headline = el(emergency, "headline");
+    const cta = el(emergency, "cta");
+    expect(headline.visible).toBe(true);
+    expect(cta.visible).toBe(true);
+    // Genuinely tiny, not the declared 180×40 / 120×44 — that's the point.
+    expect(headline.width).toBeLessThan(180);
+  });
+
+  it("resolveLayout picks emergency-fit as the winner there — a real, positive score instead of a 0/5 hard-fail", () => {
+    const ctx = resolveContext(tooNarrow);
+    const { layout, trace } = resolveLayout(buildGraph(productAd), ctx, tooNarrow);
+    expect(trace.winningStrategy).toBe("emergency-fit");
+    expect(layout.elements.filter((e) => e.visible).length).toBeGreaterThan(0);
+    const winnerScore = trace.candidateScores.find((c) => c.strategy === "emergency-fit")!.score.overall;
+    expect(winnerScore).toBeGreaterThan(0);
+  });
+
+  it("height too short for both always-elements together: emergency-fit still fits both by claiming only a small share each", () => {
+    const ctx = resolveContext(tooShort);
+    const cands = generateCandidates(buildGraph(productAd), ctx, tooShort);
+    const emergency = strat(cands, "emergency-fit");
+
+    expect(el(emergency, "headline").visible).toBe(true);
+    expect(el(emergency, "cta").visible).toBe(true);
+  });
+
+  it("on a normal, spacious surface, emergency-fit never wins — it always forces always-elements small, so it always carries a self-inflicted 'below minSize' penalty vertical-stack doesn't have", () => {
+    const spacious: SurfaceProfile = defineSurface({ id: "emergency-noop", width: 4000, height: 4000 });
+    const ctx = resolveContext(spacious);
+    const cands = generateCandidates(buildGraph(productAd), ctx, spacious);
+    const vs = strat(cands, "vertical-stack");
+    const emergency = strat(cands, "emergency-fit");
+
+    // Both place every element (nothing needed rescuing here) — the relaxed
+    // floor is unconditional in emergency-fit, so its always-elements are
+    // deliberately tiny even though there was no need, which is exactly what
+    // keeps it losing on every surface that didn't need the rescue.
+    for (const id of ["headline", "cta", "product-image", "price", "logo"]) {
+      expect(el(vs, id).visible).toBe(true);
+      expect(el(emergency, id).visible).toBe(true);
+    }
+    expect(el(emergency, "headline").width).toBeLessThan(el(vs, "headline").width);
+
+    const { trace } = resolveLayout(buildGraph(productAd), ctx, spacious);
+    expect(trace.winningStrategy).not.toBe("emergency-fit");
+  });
+
+  it("emergency-fit never breaks the non-overlap / in-bounds invariants, even at its most degenerate", () => {
+    for (const surface of [tooNarrow, tooShort]) {
+      const ctx = resolveContext(surface);
+      const emergency = strat(generateCandidates(buildGraph(productAd), ctx, surface), "emergency-fit");
+      const visible = emergency.elements.filter((e) => e.visible);
+      for (let i = 0; i < visible.length; i++) {
+        for (let j = i + 1; j < visible.length; j++) {
+          const a = visible[i]!;
+          const b = visible[j]!;
+          const overlaps = a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+          expect(overlaps).toBe(false);
+        }
+        expect(visible[i]!.x + visible[i]!.width).toBeLessThanOrEqual(surface.width + 0.5);
+        expect(visible[i]!.y + visible[i]!.height).toBeLessThanOrEqual(surface.height + 0.5);
+      }
+    }
   });
 });
